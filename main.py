@@ -1,11 +1,14 @@
 import sys
+import csv
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QFileDialog,
                              QInputDialog, QVBoxLayout, QHBoxLayout, QWidget, QSlider,
                              QGraphicsScene, QGraphicsView, QGraphicsEllipseItem,
                              QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
-                             QGraphicsItemGroup, QGraphicsItem)
-from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QPen, QCursor, QTransform
-from PyQt5.QtCore import Qt, QRectF, QPointF, QLineF, pyqtSignal, QObject
+                             QGraphicsItemGroup, QGraphicsItem, QStyleFactory, QFrame, QGridLayout,
+                             QSizePolicy, QMessageBox, QMenu, QAction)
+from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QPen, QCursor, QTransform, QPainter, QLinearGradient, QPalette, QIcon
+from PyQt5.QtCore import Qt, QRectF, QPointF, QLineF, pyqtSignal, QObject, QSize
+import traceback
 
 
 class CustomGraphicsScene(QGraphicsScene):
@@ -24,23 +27,58 @@ class DraggableLabelSignals(QObject):
     deleteRequested = pyqtSignal(object)
 
 
-class DraggableLabel(QGraphicsItemGroup):
-    def __init__(self, x, y, name, height, analyzer, parent=None):
+class ModernButton(QPushButton):
+    def __init__(self, icon_path, text, parent=None):
         super().__init__(parent)
+        self.setText(text)
+        self.setIcon(QIcon(icon_path))
+        self.setIconSize(QSize(32, 32))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #34495e;
+                color: white;
+                border: 2px solid #2c3e50;
+                border-radius: 10px;
+                padding: 10px;
+                text-align: center;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #3498db;
+                border-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #2980b9;
+                border-color: #21618c;
+            }
+        """)
+
+    def sizeHint(self):
+        return QSize(120, 60)  # Set a default size for the buttons
+
+
+
+
+
+class DraggableLabel(QGraphicsItemGroup):
+    def __init__(self, x, y, name, height, analyzer):
+        super().__init__()
         self.setFlag(QGraphicsItemGroup.ItemIsMovable)
         self.setFlag(QGraphicsItemGroup.ItemSendsGeometryChanges)
         self.x = x
         self.y = y
         self.name = name
         self.height = height
-        self.analyzer = analyzer  # Store reference to CapillaryAnalyzer
+        self.analyzer = analyzer
         self.signals = DraggableLabelSignals()
         self.delete_button = None
         self.create_label()
 
     def create_label(self):
-        font_size = 16
-        label_text = f"{self.name}: {self.height:.2f} µm"
+        font_size = 14
+        label_text = self.get_label_text()
         label = QGraphicsTextItem(label_text)
         font = QFont("Arial", font_size)
         label.setFont(font)
@@ -48,27 +86,27 @@ class DraggableLabel(QGraphicsItemGroup):
 
         text_width = label.boundingRect().width()
         text_height = label.boundingRect().height()
-        padding = 10
-        delete_button_size = 24
+        padding = 8
+        delete_button_size = 20
         total_width = text_width + delete_button_size + padding * 2
         total_height = max(text_height, delete_button_size) + padding * 2
 
         background = QGraphicsRectItem(0, 0, total_width, total_height)
-        background.setBrush(QColor(0, 0, 0, 180))
+        background.setBrush(QColor(60, 60, 60, 220))
+        background.setPen(QPen(QColor(100, 100, 100), 1))
 
         label.setPos(QPointF(padding, padding))
 
         delete_button = QGraphicsRectItem(total_width - delete_button_size - padding, padding, delete_button_size,
                                           delete_button_size)
-        delete_button.setBrush(QColor(255, 0, 0))
+        delete_button.setBrush(QColor(200, 60, 60))
+        delete_button.setPen(QPen(QColor(220, 80, 80), 1))
         delete_button.setFlag(QGraphicsItem.ItemIsSelectable)
-        delete_button.setCursor(Qt.PointingHandCursor)
 
         delete_cross = QGraphicsTextItem('×')
-        delete_cross.setFont(QFont("Arial", delete_button_size, QFont.Bold))
+        delete_cross.setFont(QFont("Arial", delete_button_size - 4, QFont.Bold))
         delete_cross.setDefaultTextColor(QColor(255, 255, 255))
 
-        # Center the cross in the delete button
         cross_rect = delete_cross.boundingRect()
         cross_x = delete_button.rect().center().x() - cross_rect.width() / 2
         cross_y = delete_button.rect().center().y() - cross_rect.height() / 2
@@ -80,110 +118,297 @@ class DraggableLabel(QGraphicsItemGroup):
         self.addToGroup(delete_cross)
         self.delete_button = delete_button
 
-
         self.setPos(self.x + 10, self.y - total_height - 10)
 
     def mousePressEvent(self, event):
-        if self.delete_button and self.delete_button.contains(event.pos()):
+        if event.button() == Qt.RightButton:
+            self.show_context_menu(event.screenPos())
+        elif self.delete_button.contains(event.pos()):
             self.signals.deleteRequested.emit(self)
-            event.accept()
         else:
             super().mousePressEvent(event)
+
+    def show_context_menu(self, pos):
+        menu = QMenu()
+        rename_action = menu.addAction("Rename")
+        delete_action = menu.addAction("Delete")
+
+        # Add submenu for previously used names
+        names_submenu = menu.addMenu("Select Name")
+        for name in self.analyzer.used_names:
+            names_submenu.addAction(name)
+
+        action = menu.exec_(pos)
+        if action == rename_action:
+            self.rename()
+        elif action == delete_action:
+            self.signals.deleteRequested.emit(self)
+        elif action and action.text() in self.analyzer.used_names:
+            self.name = action.text()
+            self.update_label_text()
+
+    def rename(self):
+        dialog = self.analyzer.create_styled_input_dialog("Rename Particle", "Enter new name:", self.name or "")
+        if dialog.exec_() == QInputDialog.Accepted:
+            new_name = dialog.textValue()
+            self.name = new_name if new_name else ''
+            if self.name:
+                self.analyzer.add_used_name(self.name)
+            self.update_label_text()
+            self.analyzer.update_particle_data(self, {'name': self.name})
+
+    def get_label_text(self):
+        if self.name:
+            return f"{self.name}: {self.height:.2f} µm"
+        else:
+            return f"{self.height:.2f} µm"
+
+
+    def update_label_text(self):
+        label_text = self.get_label_text()
+        self.childItems()[1].setPlainText(label_text)
 
     def itemChange(self, change, value):
         if change == QGraphicsItemGroup.ItemPositionHasChanged and self.scene():
             self.scene().update_connection_line(self)
-            # Update the label position in the particles list
-            for i, (px, py, name, height, _) in enumerate(self.analyzer.particles):
-                if abs(self.x - px) < 10 and abs(self.y - py) < 10:
-                    self.analyzer.particles[i] = (px, py, name, height, self.pos())
-                    break
         return super().itemChange(change, value)
+
+
 class CapillaryAnalyzer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PHASe - Particle Height Analysis Software")
-        self.setGeometry(100, 100, 1000, 600)
+        self.setGeometry(100, 100, 1200, 800)
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2c3e50;
+            }
+            QLabel {
+                color: white;
+                font-size: 14px;
+            }
+        """)
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout()
         main_widget.setLayout(main_layout)
 
+        self.message_box_style = """
+                QMessageBox {
+                    background-color: #2c3e50;
+                    color: white;
+                }
+                QMessageBox QLabel {
+                    color: white;
+                }
+                QMessageBox QPushButton {
+                    background-color: #34495e;
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    padding: 5px;
+                    min-width: 70px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #3498db;
+                }
+                """
+
+        # Control panel
+        control_panel = QFrame()
+        control_panel.setStyleSheet("""
+                    QFrame {
+                        background-color: #34495e;
+                        border-radius: 15px;
+                        margin: 10px;
+                    }
+                    QFrame#separator {
+                        background-color: #2c3e50;
+                        min-height: 2px;
+                        max-height: 2px;
+                    }
+                """)
+        control_layout = QVBoxLayout(control_panel)
+
+        # Logo space
+        logo_label = QLabel()
+        logo_pixmap = QPixmap("path/to/your/logo.png")
+        logo_label.setPixmap(logo_pixmap.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo_label.setAlignment(Qt.AlignCenter)
+        control_layout.addWidget(logo_label)
+
+        # Load Image button (spans two button widths)
+        self.load_button = ModernButton("assets/phase_logo.png", "Load Image")
+        self.load_button.clicked.connect(self.load_image)
+        control_layout.addWidget(self.load_button)
+
+
+        # Ceiling and Floor buttons
+        ceiling_floor_layout = QHBoxLayout()
+
+        ceiling_floor_left = QVBoxLayout()
+        self.set_ceiling_button = ModernButton("assets/set_ceiling_btn.png", "Set Ceiling")
+        self.set_ceiling_button.clicked.connect(self.set_ceiling_mode)
+        ceiling_floor_left.addWidget(self.set_ceiling_button)
+
+        self.set_floor_button = ModernButton("assets/set_floor_btn.png", "Set Floor")
+        self.set_floor_button.clicked.connect(self.set_floor_mode)
+        ceiling_floor_left.addWidget(self.set_floor_button)
+
+        ceiling_floor_layout.addLayout(ceiling_floor_left)
+
+
+        # Set Height button (spans two button heights)
+        self.set_height_button = ModernButton("assets/set_height_btn.png", "Set Height")
+        self.set_height_button.clicked.connect(self.set_height)
+        self.set_height_button.setFixedHeight(
+            self.set_ceiling_button.sizeHint().height() * 2 + 10)  # Match height of two buttons + spacing
+        ceiling_floor_layout.addWidget(self.set_height_button)
+
+        control_layout.addLayout(ceiling_floor_layout)
+
+
+        # Export CSV button (spans two button widths)
+        self.export_button = ModernButton("assets/export_csv_btn", "Export CSV")
+        self.export_button.clicked.connect(self.export_csv)
+        control_layout.addWidget(self.export_button)
+
+        control_layout.addStretch()
+
         # Image area
         self.graphics_view = QGraphicsView()
-        self.graphics_view.setFixedSize(800, 500)
+        self.graphics_view.setStyleSheet("""
+            QGraphicsView {
+                background-color: #2c3e50;
+                border: none;
+                border-radius: 15px;
+            }
+        """)
         self.scene = CustomGraphicsScene(self)
         self.graphics_view.setScene(self.scene)
+        self.graphics_view.setRenderHint(QPainter.Antialiasing)
+        self.graphics_view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.graphics_view.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
 
-        # Controls area
-        controls_layout = QVBoxLayout()
-
-        self.load_button = QPushButton("Load Image")
-        self.load_button.clicked.connect(self.load_image)
-
-        self.ceiling_slider = QSlider(Qt.Vertical)
-        self.ceiling_slider.setRange(0, 500)
-        self.ceiling_slider.setValue(0)  # Inverted
-        self.ceiling_slider.valueChanged.connect(self.update_lines)
-
-        self.floor_slider = QSlider(Qt.Vertical)
-        self.floor_slider.setRange(0, 500)
-        self.floor_slider.setValue(500)  # Inverted
-        self.floor_slider.valueChanged.connect(self.update_lines)
-
-        self.set_height_button = QPushButton("Set Height")
-        self.set_height_button.clicked.connect(self.set_height)
-
-        controls_layout.addWidget(self.load_button)
-        controls_layout.addWidget(QLabel("Ceiling"))
-        controls_layout.addWidget(self.ceiling_slider)
-        controls_layout.addWidget(QLabel("Floor"))
-        controls_layout.addWidget(self.floor_slider)
-        controls_layout.addWidget(self.set_height_button)
-
-        main_layout.addWidget(self.graphics_view)
-        main_layout.addLayout(controls_layout)
+        main_layout.addWidget(control_panel, 1)
+        main_layout.addWidget(self.graphics_view, 3)
 
         self.original_image = None
-        self.image_item = None  # Initialize image_item attribute
+        self.image_item = None
         self.capillary_height = None
         self.particles = []
+        self.particle_items = []
+        self.ceiling_y = None
+        self.floor_y = None
+        self.current_mode = None
+        self.used_names = set()
 
-        self.floor_slider.valueChanged.connect(self.update_particles)
-        self.ceiling_slider.valueChanged.connect(self.update_particles)
+        self.ceiling_line = None
+        self.floor_line = None
+        self.scale_factor = 1.0
 
     def load_image(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.bmp)")
-        if file_name:
-            self.original_image = QImage(file_name)
-            if self.image_item:
-                self.scene.removeItem(self.image_item)
-            self.image_item = self.scene.addPixmap(QPixmap.fromImage(self.original_image))
-            self.scene.setSceneRect(self.image_item.boundingRect())
+        try:
+            file_name, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.bmp)")
+            if file_name:
+                image = QImage(file_name)
+                if image.isNull():
+                    raise Exception("Failed to load image.")
+
+                self.original_image = image.convertToFormat(QImage.Format_RGB32)
+                self.scene.clear()
+                pixmap = QPixmap.fromImage(self.original_image)
+                self.image_item = self.scene.addPixmap(pixmap)
+                self.scene.setSceneRect(self.image_item.boundingRect())
+                self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+
+                # Calculate scale factor based on image size
+                base_width = 1000  # You can adjust this value
+                self.scale_factor = self.original_image.width() / base_width
+
+                self.particles = []
+                self.ceiling_y = None
+                self.floor_y = None
+
+                print(f"Image loaded successfully: {file_name}")
+                print(f"Image size: {self.original_image.width()}x{self.original_image.height()}")
+                print(f"Scale factor: {self.scale_factor}")
+        except Exception as e:
+            error_message = f"Error loading image: {str(e)}"
+            print(error_message)
+            QMessageBox.critical(self, "Error", error_message)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.image_item:
             self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-            self.update_lines()
+
+    def set_ceiling_mode(self):
+        self.current_mode = "ceiling"
+        self.graphics_view.viewport().setCursor(Qt.CrossCursor)
+
+    def set_floor_mode(self):
+        self.current_mode = "floor"
+        self.graphics_view.viewport().setCursor(Qt.CrossCursor)
+
+    def mousePressEvent(self, event):
+        if self.original_image and self.graphics_view.underMouse():
+            scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
+
+            if self.current_mode == "ceiling":
+                self.ceiling_y = scene_pos.y()
+                self.current_mode = None
+                self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
+                self.update_lines()
+            elif self.current_mode == "floor":
+                self.floor_y = scene_pos.y()
+                self.current_mode = None
+                self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
+                self.update_lines()
+            elif not isinstance(self.scene.itemAt(scene_pos, self.graphics_view.transform()),
+                                (QGraphicsRectItem, QGraphicsTextItem)):
+                x, y = scene_pos.x(), scene_pos.y()
+                height = self.calculate_height(y)
+                label_pos = QPointF(x + 10, y - 60)
+                new_particle = {
+                    'x': x,
+                    'y': y,
+                    'name': '',
+                    'height': height,
+                    'label_pos': label_pos
+                }
+                self.particles.append(new_particle)
+                self.draw_particles()
+
+    def update_particle_name(self, label, new_name):
+        for particle in self.particles:
+            if particle.get('label_item') == label:
+                particle['name'] = new_name
+                break
 
     def update_lines(self):
-        if self.original_image:
-            self.scene.clear()
-            self.scene.addPixmap(QPixmap.fromImage(self.original_image))
+        if self.original_image and self.image_item:
+            # Remove existing ceiling and floor lines if they exist
+            if hasattr(self, 'ceiling_line') and self.ceiling_line:
+                self.scene.removeItem(self.ceiling_line)
+            if hasattr(self, 'floor_line') and self.floor_line:
+                self.scene.removeItem(self.floor_line)
 
-            height = self.original_image.height()
             width = self.original_image.width()
 
-            floor_y = int(self.floor_slider.value() * height / 500)
-            ceiling_y = int(self.ceiling_slider.value() * height / 500)
-
-            floor_line = self.scene.addLine(0, floor_y, width, floor_y, QPen(QColor(0, 255, 0), 2))
-            ceiling_line = self.scene.addLine(0, ceiling_y, width, ceiling_y, QPen(QColor(255, 0, 0), 2))
+            if self.floor_y is not None:
+                self.floor_line = self.scene.addLine(0, self.floor_y, width, self.floor_y, QPen(QColor(0, 255, 0), 2))
+            if self.ceiling_y is not None:
+                self.ceiling_line = self.scene.addLine(0, self.ceiling_y, width, self.ceiling_y,
+                                                       QPen(QColor(255, 0, 0), 2))
 
             self.draw_particles()
 
     def set_height(self):
-        height, ok = QInputDialog.getText(self, "Set Capillary Height", "Enter height (e.g. 0.1mm, 100um, 100000pm):")
-        if ok:
-            height = height.replace(" ", "").lower()
+        dialog = self.create_styled_input_dialog("Set Capillary Height", "Enter height (e.g. 0.1mm, 100um, 100000pm):")
+        if dialog.exec_() == QInputDialog.Accepted:
+            height = dialog.textValue().replace(" ", "").lower()
             unit_start = 0
             for i, char in enumerate(height):
                 if not (char.isdigit() or char == '.'):
@@ -191,7 +416,7 @@ class CapillaryAnalyzer(QMainWindow):
                     break
 
             if unit_start == 0:
-                print("Invalid input. Please enter a number followed by a unit (um, mm, or pm).")
+                self.show_warning_message("Invalid Input", "Please enter a number followed by a unit (um, mm, or pm).")
                 return
 
             try:
@@ -205,93 +430,174 @@ class CapillaryAnalyzer(QMainWindow):
                 elif unit == 'pm':
                     self.capillary_height = value / 1000
                 else:
-                    print("Invalid unit. Please use um, mm, or pm.")
+                    self.show_warning_message("Invalid Unit", "Please use um, mm, or pm.")
                     return
 
-                print(f"Capillary height set to {self.capillary_height} um")
+                self.show_info_message("Height Set", f"Capillary height set to {self.capillary_height} µm")
                 self.update_particles()
             except ValueError:
-                print("Invalid number format. Please enter a valid number followed by a unit.")
+                self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
 
-    def update_connection_line(self, label):
-        line = self.scene.items()[-1]  # Assuming the line is the last item added
-        start = QPointF(label.x, label.y)
-        end = label.sceneBoundingRect().center()
-        line.setLine(QLineF(start, end))
+    def create_styled_input_dialog(self, title, label, text=""):
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText(label)
+        dialog.setTextValue(text)
+        dialog.setStyleSheet("""
+            QInputDialog {
+                background-color: #2c3e50;
+                color: white;
+            }
+            QInputDialog QLineEdit {
+                background-color: #34495e;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QInputDialog QPushButton {
+                background-color: #34495e;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+                min-width: 70px;
+            }
+            QInputDialog QPushButton:hover {
+                background-color: #3498db;
+            }
+        """)
+        return dialog
 
-    def mousePressEvent(self, event):
-        if self.original_image and self.graphics_view.underMouse():
-            scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
-            item = self.scene.itemAt(scene_pos, self.graphics_view.transform())
-
-            if isinstance(item, QGraphicsEllipseItem):
-                # Clicked on particle dot
-                return
-
-            if not isinstance(item, (QGraphicsRectItem, QGraphicsTextItem)):
-                # Clicked elsewhere, add new particle
-                x, y = scene_pos.x(), scene_pos.y()
-                name, ok = QInputDialog.getText(self, "Particle Name", "Enter particle name:")
-                if ok:
-                    height = self.calculate_height(y)
-                    label_pos = QPointF(x + 10, y - 60)  # Initial label position
-                    self.particles.append((x, y, name, height, label_pos))
-                    self.draw_particles()
 
     def calculate_height(self, y):
-        if self.capillary_height is not None:
-            height = self.original_image.height()
-            floor_y = height - int(self.floor_slider.value() * height / 500)  # Inverted
-            ceiling_y = height - int(self.ceiling_slider.value() * height / 500)  # Inverted
-            total_pixels = abs(ceiling_y - floor_y)
-            pixels_from_bottom = abs(y - floor_y)
+        if self.capillary_height is not None and self.ceiling_y is not None and self.floor_y is not None:
+            total_pixels = abs(self.ceiling_y - self.floor_y)
+            pixels_from_bottom = abs(y - self.floor_y)
             return (pixels_from_bottom / total_pixels) * self.capillary_height
         return 0
+
     def update_particles(self):
-        updated_particles = []
-        for x, y, name, _, label_pos in self.particles:
-            height = self.calculate_height(y)
-            updated_particles.append((x, y, name, height, label_pos))
-        self.particles = updated_particles
-        self.draw_particles()
+        if self.capillary_height is not None:
+            updated_particles = []
+            for x, y, name, _, label_pos in self.particles:
+                height = self.calculate_height(y)
+                updated_particles.append((x, y, name, height, label_pos))
+            self.particles = updated_particles
+            self.draw_particles()
 
     def draw_particles(self):
-        self.scene.clear()
-        self.scene.addPixmap(QPixmap.fromImage(self.original_image))
+        if self.original_image and self.image_item:
+            for particle in self.particles:
+                if 'label_item' not in particle:
+                    x, y = particle['x'], particle['y']
 
-        height = self.original_image.height()
-        width = self.original_image.width()
+                    # Scale the particle dot size
+                    dot_size = 6 * self.scale_factor
+                    particle_dot = QGraphicsEllipseItem(x - dot_size / 2, y - dot_size / 2, dot_size, dot_size)
+                    particle_dot.setBrush(QColor(255, 0, 0))
+                    self.scene.addItem(particle_dot)
 
-        floor_y = height - int(self.floor_slider.value() * height / 500)  # Inverted
-        ceiling_y = height - int(self.ceiling_slider.value() * height / 500)  # Inverted
+                    label = DraggableLabel(x, y, particle['name'], particle['height'], self)
+                    label.setPos(particle['label_pos'])
+                    label.signals.deleteRequested.connect(self.delete_particle)
+                    self.scene.addItem(label)
 
-        self.scene.addLine(0, floor_y, width, floor_y, QPen(QColor(0, 255, 0), 2))
-        self.scene.addLine(0, ceiling_y, width, ceiling_y, QPen(QColor(255, 0, 0), 2))
+                    # Scale the line width
+                    line = QGraphicsLineItem()
+                    line.setPen(QPen(QColor(255, 255, 255), max(1, int(self.scale_factor)), Qt.DashLine))
+                    self.scene.addItem(line)
+                    label.setData(0, line)
 
-        for x, y, name, particle_height, label_pos in self.particles:
-            particle = QGraphicsEllipseItem(x - 3, y - 3, 6, 6)
-            particle.setBrush(QColor(255, 0, 0))
-            self.scene.addItem(particle)
+                    particle['label_item'] = label
+                    particle['dot_item'] = particle_dot
+                    particle['line_item'] = line
 
-            label = DraggableLabel(x, y, name, particle_height, self)  # Pass 'self' as analyzer
-            label.signals.deleteRequested.connect(self.delete_particle)
-            label.setPos(label_pos)
-            self.scene.addItem(label)
+                self.scene.update_connection_line(particle['label_item'])
 
-            line = QGraphicsLineItem()
-            line.setPen(QPen(QColor(0, 0, 0), 1, Qt.DashLine))
-            self.scene.addItem(line)
-            label.setData(0, line)
-            self.scene.update_connection_line(label)
-    def delete_particle(self, label):
-        for i, (px, py, _, _, _) in enumerate(self.particles):
-            if abs(label.x - px) < 10 and abs(label.y - py) < 10:
-                del self.particles[i]
-                self.draw_particles()
+    def show_error_message(self, title, message):
+        error_box = QMessageBox(self)
+        error_box.setStyleSheet(self.message_box_style)
+        error_box.setIcon(QMessageBox.Critical)
+        error_box.setWindowTitle(title)
+        error_box.setText(message)
+        error_box.exec_()
+
+
+    def show_info_message(self, title, message):
+        info_box = QMessageBox(self)
+        info_box.setStyleSheet(self.message_box_style)
+        info_box.setIcon(QMessageBox.Information)
+        info_box.setWindowTitle(title)
+        info_box.setText(message)
+        info_box.exec_()
+
+
+    def show_warning_message(self, title, message):
+        warning_box = QMessageBox(self)
+        warning_box.setStyleSheet(self.message_box_style)
+        warning_box.setIcon(QMessageBox.Warning)
+        warning_box.setWindowTitle(title)
+        warning_box.setText(message)
+        warning_box.exec_()
+
+    def update_particle_data(self, label, new_data):
+        for particle in self.particles:
+            if particle['label_item'] == label:
+                particle.update(new_data)
                 break
 
+    def delete_particle(self, label):
+        for i, particle in enumerate(self.particles):
+            if particle['label_item'] == label:
+                self.scene.removeItem(particle['label_item'])
+                self.scene.removeItem(particle['dot_item'])
+                self.scene.removeItem(particle['line_item'])
+                del self.particles[i]
+                break
+
+        self.scene.update()
+
+
+    def add_used_name(self, name):
+        self.used_names.add(name)
+
+    def export_csv(self):
+        if not self.particles:
+            self.show_warning_message("Export Error", "No particles to export.")
+            return
+
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv)")
+        if file_name:
+            try:
+                with open(file_name, 'w', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(['Name', 'X', 'Y', 'Height (µm)'])
+                    for particle in self.particles:
+                        writer.writerow([
+                            particle['name'] if particle['name'] else '',
+                            particle['x'],
+                            particle['y'],
+                            f"{particle['height']:.2f}"
+                        ])
+                self.show_info_message("Export Successful", f"Data exported to {file_name}")
+            except Exception as e:
+                self.show_error_message("Export Error", f"Error exporting data: {str(e)}")
+
+
+def exception_hook(exctype, value, tb):
+    print(''.join(traceback.format_exception(exctype, value, tb)))
+    sys.exit(1)
+
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = CapillaryAnalyzer()
-    window.show()
-    sys.exit(app.exec_())
+    sys.excepthook = exception_hook
+    try:
+        app = QApplication(sys.argv)
+        window = CapillaryAnalyzer()
+        window.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        print("Traceback:")
+        traceback.print_exc()
+        sys.exit(1)
