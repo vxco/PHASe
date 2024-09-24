@@ -17,7 +17,7 @@ import tempfile
 import subprocess
 from urllib.request import urlretrieve
 
-CURRENT_VERSION = "2.5.2"
+CURRENT_VERSION = "2.5.5"
 
 
 
@@ -680,13 +680,16 @@ class CapillaryAnalyzer(QMainWindow):
             if not app_path:
                 raise Exception("Could not find .app in the downloaded update")
 
-            current_app_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            current_app_path = os.path.abspath(sys.executable)
+            current_app_dir = os.path.dirname(os.path.dirname(current_app_path))
+            new_app_path = os.path.join(os.path.dirname(current_app_dir), os.path.basename(app_path))
+
             updater_script = f"""
             #!/bin/bash
             sleep 2
-            rm -rf "{current_app_path}"
-            mv "{app_path}" "{os.path.dirname(current_app_path)}"
-            open "{os.path.dirname(current_app_path)}/{os.path.basename(app_path)}"
+            rm -rf "{current_app_dir}"
+            mv "{app_path}" "{new_app_path}"
+            open "{new_app_path}"
             """
 
             with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
