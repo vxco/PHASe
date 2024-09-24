@@ -17,7 +17,7 @@ import tempfile
 import subprocess
 from urllib.request import urlretrieve
 
-CURRENT_VERSION = "2.1.5"
+CURRENT_VERSION = "2.5.2"
 
 
 
@@ -95,7 +95,7 @@ class DraggableLabel(QGraphicsItemGroup):
         text_height = label.boundingRect().height()
         padding = 8
         delete_button_size = 20
-        total_width = text_width + delete_button_size + padding * 2
+        total_width = max(text_width + delete_button_size + padding * 2, 100)  # Minimum width of 100
         total_height = max(text_height, delete_button_size) + padding * 2
 
         background = QGraphicsRectItem(0, 0, total_width, total_height)
@@ -114,10 +114,11 @@ class DraggableLabel(QGraphicsItemGroup):
         delete_cross.setFont(QFont("Arial", delete_button_size - 4, QFont.Bold))
         delete_cross.setDefaultTextColor(QColor(255, 255, 255))
 
+        # Center the cross in the delete button
         cross_rect = delete_cross.boundingRect()
-        cross_x = delete_button.rect().center().x() - cross_rect.width() / 2
-        cross_y = delete_button.rect().center().y() - cross_rect.height() / 2
-        delete_cross.setPos(delete_button.pos() + QPointF(cross_x, cross_y))
+        cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
+        cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
+        delete_cross.setPos(cross_x, cross_y)
 
         self.addToGroup(background)
         self.addToGroup(label)
@@ -153,6 +154,7 @@ class DraggableLabel(QGraphicsItemGroup):
         elif action and action.text() in self.analyzer.used_names:
             self.name = action.text()
             self.update_label_text()
+            self.analyzer.update_particle_data(self, {'name': self.name})
 
     def rename(self):
         dialog = self.analyzer.create_styled_input_dialog("Rename Particle", "Enter new name:", self.name or "")
@@ -170,10 +172,39 @@ class DraggableLabel(QGraphicsItemGroup):
         else:
             return f"{self.height:.2f} µm"
 
-
     def update_label_text(self):
         label_text = self.get_label_text()
-        self.childItems()[1].setPlainText(label_text)
+        text_item = self.childItems()[1]
+        text_item.setPlainText(label_text)
+
+        # Recalculate size
+        text_width = text_item.boundingRect().width()
+        text_height = text_item.boundingRect().height()
+        padding = 8
+        delete_button_size = 20
+        total_width = max(text_width + delete_button_size + padding * 2, 100)  # Minimum width of 100
+        total_height = max(text_height, delete_button_size) + padding * 2
+
+        # Update background rectangle
+        background = self.childItems()[0]
+        background.setRect(0, 0, total_width, total_height)
+
+        # Update delete button position
+        delete_button = self.childItems()[2]
+        delete_button.setRect(total_width - delete_button_size - padding, padding, delete_button_size,
+                              delete_button_size)
+
+        # Update delete cross position
+        delete_cross = self.childItems()[3]
+        cross_rect = delete_cross.boundingRect()
+        cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
+        cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
+        delete_cross.setPos(cross_x, cross_y)
+
+        # This method is so janky I can't even look at it
+        # But, it works. So, I'm not going to touch it.
+        # #ifitworksdonttouchit
+
 
     def itemChange(self, change, value):
         if change == QGraphicsItemGroup.ItemPositionHasChanged and self.scene():
@@ -554,7 +585,10 @@ class CapillaryAnalyzer(QMainWindow):
         for particle in self.particles:
             if particle['label_item'] == label:
                 particle.update(new_data)
+                if 'name' in new_data:
+                    self.add_used_name(new_data['name'])
                 break
+
 
     def delete_particle(self, label):
         for i, particle in enumerate(self.particles):
@@ -584,7 +618,7 @@ class CapillaryAnalyzer(QMainWindow):
                     writer.writerow(['Name', 'X', 'Y', 'Height (µm)'])
                     for particle in self.particles:
                         writer.writerow([
-                            particle['name'] if particle['name'] else '',
+                            particle['name'],
                             particle['x'],
                             particle['y'],
                             f"{particle['height']:.2f}"
@@ -628,7 +662,7 @@ class CapillaryAnalyzer(QMainWindow):
     def download_and_install_update(self, release):
         try:
             # Find the .app asset
-            app_asset = next((asset for asset in release['assets'] if asset['name'].endswith('.osx64app.zip')), None)
+            app_asset = next((asset for asset in release['assets'] if asset['name'].endswith('_osx64app.zip')), None)
             if not app_asset:
                 raise Exception("No .app download found in the release")
 
