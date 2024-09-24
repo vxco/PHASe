@@ -6,9 +6,19 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QFi
                              QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
                              QGraphicsItemGroup, QGraphicsItem, QStyleFactory, QFrame, QGridLayout,
                              QSizePolicy, QMessageBox, QMenu, QAction)
-from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QPen, QCursor, QTransform, QPainter, QLinearGradient, QPalette, QIcon
-from PyQt5.QtCore import Qt, QRectF, QPointF, QLineF, pyqtSignal, QObject, QSize
+from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QPen, QCursor, QTransform, QPainter, QLinearGradient, QPalette, QIcon, QDesktopServices
+from PyQt5.QtCore import Qt, QRectF, QPointF, QLineF, pyqtSignal, QObject, QSize, QUrl, QTimer
 import traceback
+import requests
+import json
+from packaging import version
+import os
+import tempfile
+import subprocess
+from urllib.request import urlretrieve
+
+CURRENT_VERSION = "2.1.5"
+
 
 
 class CustomGraphicsScene(QGraphicsScene):
@@ -43,7 +53,7 @@ class ModernButton(QPushButton):
                 border-radius: 10px;
                 padding: 10px;
                 text-align: center;
-                font-size: 14px;
+                font-size: 13px;
             }
             QPushButton:hover {
                 background-color: #3498db;
@@ -57,9 +67,6 @@ class ModernButton(QPushButton):
 
     def sizeHint(self):
         return QSize(120, 60)  # Set a default size for the buttons
-
-
-
 
 
 class DraggableLabel(QGraphicsItemGroup):
@@ -233,13 +240,13 @@ class CapillaryAnalyzer(QMainWindow):
 
         # Logo space
         logo_label = QLabel()
-        logo_pixmap = QPixmap("path/to/your/logo.png")
+        logo_pixmap = QPixmap("assets/phase_logo_v3.svg")
         logo_label.setPixmap(logo_pixmap.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignCenter)
         control_layout.addWidget(logo_label)
 
         # Load Image button (spans two button widths)
-        self.load_button = ModernButton("assets/phase_logo.png", "Load Image")
+        self.load_button = ModernButton("assets/load_image_btn.svg", "Load Image")
         self.load_button.clicked.connect(self.load_image)
         control_layout.addWidget(self.load_button)
 
@@ -248,11 +255,11 @@ class CapillaryAnalyzer(QMainWindow):
         ceiling_floor_layout = QHBoxLayout()
 
         ceiling_floor_left = QVBoxLayout()
-        self.set_ceiling_button = ModernButton("assets/set_ceiling_btn.png", "Set Ceiling")
+        self.set_ceiling_button = ModernButton("assets/set_ceiling_btn.svg", "Set Ceiling")
         self.set_ceiling_button.clicked.connect(self.set_ceiling_mode)
         ceiling_floor_left.addWidget(self.set_ceiling_button)
 
-        self.set_floor_button = ModernButton("assets/set_floor_btn.png", "Set Floor")
+        self.set_floor_button = ModernButton("assets/set_floor_btn.svg", "Set Floor")
         self.set_floor_button.clicked.connect(self.set_floor_mode)
         ceiling_floor_left.addWidget(self.set_floor_button)
 
@@ -260,17 +267,17 @@ class CapillaryAnalyzer(QMainWindow):
 
 
         # Set Height button (spans two button heights)
-        self.set_height_button = ModernButton("assets/set_height_btn.png", "Set Height")
+        self.set_height_button = ModernButton("assets/set_height_btn.svg", "Set Height")
         self.set_height_button.clicked.connect(self.set_height)
         self.set_height_button.setFixedHeight(
-            self.set_ceiling_button.sizeHint().height() * 2 + 10)  # Match height of two buttons + spacing
+            self.set_ceiling_button.sizeHint().height() * 2 + 7)  # Match height of two buttons + spacing
         ceiling_floor_layout.addWidget(self.set_height_button)
 
         control_layout.addLayout(ceiling_floor_layout)
 
 
         # Export CSV button (spans two button widths)
-        self.export_button = ModernButton("assets/export_csv_btn", "Export CSV")
+        self.export_button = ModernButton("assets/export_as_csv_btn.svg", "Export CSV")
         self.export_button.clicked.connect(self.export_csv)
         control_layout.addWidget(self.export_button)
 
@@ -307,6 +314,8 @@ class CapillaryAnalyzer(QMainWindow):
         self.ceiling_line = None
         self.floor_line = None
         self.scale_factor = 1.0
+
+        QTimer.singleShot(1000, self.check_for_updates)
 
     def load_image(self):
         try:
@@ -584,10 +593,89 @@ class CapillaryAnalyzer(QMainWindow):
             except Exception as e:
                 self.show_error_message("Export Error", f"Error exporting data: {str(e)}")
 
+    def check_for_updates(self):
+        try:
+            owner = "simitbey"
+            repo = "PHASe"
+            url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+            response = requests.get(url)
+            response.raise_for_status()
+
+            latest_release = json.loads(response.text)
+            latest_version = latest_release['tag_name'].lstrip('v')
+
+            if version.parse(latest_version) > version.parse(CURRENT_VERSION):
+                message = f"A new version ({latest_version}) is available!\n"
+                message += f"You are currently using version {CURRENT_VERSION}.\n"
+                message += "Do you want to download and install the update?"
+
+                update_box = QMessageBox(self)
+                update_box.setStyleSheet(self.message_box_style)
+                update_box.setIcon(QMessageBox.Question)
+                update_box.setWindowTitle("Update Available")
+                update_box.setText(message)
+                update_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+
+                result = update_box.exec_()
+                if result == QMessageBox.Yes:
+                    self.download_and_install_update(latest_release)
+            else:
+                pass
+        except Exception as e:
+            self.show_error_message("Update Check Failed", f"Failed to check for updates: {str(e)}")
+
+    def download_and_install_update(self, release):
+        try:
+            # Find the .app asset
+            app_asset = next((asset for asset in release['assets'] if asset['name'].endswith('.osx64app.zip')), None)
+            if not app_asset:
+                raise Exception("No .app download found in the release")
+
+            # Download the update
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                self.show_info_message("Downloading Update", "The update is being downloaded. Please wait...")
+                urlretrieve(app_asset['browser_download_url'], tmp_file.name)
+
+            update_dir = tempfile.mkdtemp()
+            subprocess.run(['unzip', '-q', tmp_file.name, '-d', update_dir])
+
+            app_path = next((os.path.join(root, name)
+                             for root, dirs, files in os.walk(update_dir)
+                             for name in dirs if name.endswith('.app')), None)
+            if not app_path:
+                raise Exception("Could not find .app in the downloaded update")
+
+            current_app_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            updater_script = f"""
+            #!/bin/bash
+            sleep 2
+            rm -rf "{current_app_path}"
+            mv "{app_path}" "{os.path.dirname(current_app_path)}"
+            open "{os.path.dirname(current_app_path)}/{os.path.basename(app_path)}"
+            """
+
+            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
+                script_file.write(updater_script)
+                updater_path = script_file.name
+            os.chmod(updater_path, 0o755)
+
+            self.show_info_message("Update Ready",
+                                   "The update has been downloaded and is ready to install. The application will now close and update.")
+            subprocess.Popen(['/bin/bash', updater_path])
+            QApplication.quit()
+
+        except Exception as e:
+            self.show_error_message("Update Failed", f"Failed to download and prepare the update: {str(e)}")
+
 
 def exception_hook(exctype, value, tb):
     print(''.join(traceback.format_exception(exctype, value, tb)))
     sys.exit(1)
+
+
+
+
 
 if __name__ == "__main__":
     sys.excepthook = exception_hook
