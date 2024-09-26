@@ -17,7 +17,7 @@ import tempfile
 import subprocess
 from urllib.request import urlretrieve
 
-CURRENT_VERSION = "2.5.5"
+CURRENT_VERSION = "2.5.5b"
 
 
 
