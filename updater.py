@@ -5,7 +5,8 @@ import subprocess
 import tempfile
 import zipfile
 import platform
-from urllib.request import urlretrieve
+import requests
+import certifi
 
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QProgressBar, QLabel, QPushButton
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
@@ -24,7 +25,17 @@ class UpdaterThread(QThread):
             # Download the update
             self.update_progress.emit(10, "Downloading update...")
             with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-                urlretrieve(self.download_url, tmp_file.name)
+                response = requests.get(self.download_url, stream=True, verify=certifi.where())
+                response.raise_for_status()
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 1024  # 1 Kibibyte
+                downloaded = 0
+                for data in response.iter_content(block_size):
+                    downloaded += len(data)
+                    tmp_file.write(data)
+                    if total_size:
+                        percent = int((downloaded / total_size) * 100)
+                        self.update_progress.emit(10 + int(percent * 0.2), f"Downloading update... {percent}%")
 
             self.update_progress.emit(30, "Extracting update...")
             # Create a temporary directory for extraction
@@ -44,6 +55,10 @@ class UpdaterThread(QThread):
             self.update_progress.emit(100, "Update completed successfully!")
             self.update_finished.emit(True, "Update completed successfully! Please restart the application.")
 
+        except requests.exceptions.SSLError as ssl_err:
+            self.update_finished.emit(False, f"SSL Error: {str(ssl_err)}. Please check your internet connection and system clock.")
+        except requests.exceptions.RequestException as req_err:
+            self.update_finished.emit(False, f"Download Error: {str(req_err)}")
         except Exception as e:
             self.update_finished.emit(False, f"Error during update: {str(e)}")
 
