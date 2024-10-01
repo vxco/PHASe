@@ -2,6 +2,8 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
+import zipfile
+
 
 class Logger:
     def __init__(self, app_name):
