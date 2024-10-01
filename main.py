@@ -2201,86 +2201,31 @@ class CapillaryAnalyzer(QMainWindow):
             if not update_asset:
                 raise Exception(f"No suitable download found for {platform.system()} in the release")
 
-            # Download the update
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
-                self.show_info_message("Downloading Update", "The update is being downloaded. Please wait...")
-                urlretrieve(update_asset['browser_download_url'], tmp_file.name)
+            # Get the download URL
+            download_url = update_asset['browser_download_url']
 
-            update_dir = tempfile.mkdtemp()
+            # Get the path to the updater script
+            if getattr(sys, 'frozen', False):
+                # If the application is run as a bundle, the pyInstaller bootloader
+                # extends the sys module by a flag frozen=True and sets the app
+                # path into variable _MEIPASS'.
+                application_path = sys._MEIPASS
+            else:
+                application_path = os.path.dirname(os.path.abspath(__file__))
 
-            # Extract the downloaded zip
-            with zipfile.ZipFile(tmp_file.name, 'r') as zip_ref:
-                zip_ref.extractall(update_dir)
+            updater_path = os.path.join(application_path, 'updater.py')
 
-            if platform.system() == 'Darwin':
-                self.install_update_macos(update_dir)
-            elif platform.system() == 'Windows':
-                self.install_update_windows(update_dir)
+            # Run the updater
+            current_app_path = sys.executable
+            subprocess.Popen([sys.executable, updater_path, download_url, current_app_path])
+
+            self.show_info_message("Update Started",
+                                   "The updater has been launched. The application will now close. Please restart it after the update is complete.")
+            QApplication.quit()
 
         except Exception as e:
             self.show_error_message("Update Failed", f"Update Failed: {str(e)}")
             print(f"Error in download_and_install_update: {e}")
-
-    def install_update_macos(self, update_dir):
-        app_path = next((os.path.join(root, name)
-                         for root, dirs, files in os.walk(update_dir)
-                         for name in dirs if name.endswith('.app')), None)
-        if not app_path:
-            raise Exception("Could not find .app in the downloaded update")
-
-        current_app_path = os.path.abspath(sys.executable)
-        current_app_dir = os.path.dirname(os.path.dirname(current_app_path))
-        parent_dir = os.path.dirname(current_app_dir)
-        app_name = os.path.basename(current_app_dir)
-        new_app_path = os.path.join(parent_dir, f"{app_name}_new.app")
-
-        updater_script = f"""
-        #!/bin/bash
-        sleep 2
-        rm -rf "{current_app_dir}"
-        mv "{app_path}" "{new_app_path}"
-        mv "{new_app_path}" "{current_app_dir}"
-        xattr -rc "{current_app_dir}"
-        chmod -R 755 "{current_app_dir}"
-        open "{current_app_dir}"
-        """
-
-        with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
-            script_file.write(updater_script)
-            updater_path = script_file.name
-        os.chmod(updater_path, 0o755)
-
-        self.show_info_message("Update Ready",
-                               "The application will now close and update. Please restart the application manually after the update.")
-        subprocess.Popen(['/bin/bash', updater_path])
-        QApplication.quit()
-
-    def install_update_windows(self, update_dir):
-        exe_path = next((os.path.join(root, name)
-                         for root, dirs, files in os.walk(update_dir)
-                         for name in files if name.endswith('.exe')), None)
-        if not exe_path:
-            raise Exception("Could not find .exe in the downloaded update")
-
-        current_exe_path = os.path.abspath(sys.executable)
-        new_exe_path = os.path.join(os.path.dirname(current_exe_path), 'PHASe_new.exe')
-
-        updater_script = f"""
-        @echo off
-        timeout /t 2 /nobreak
-        move /y "{exe_path}" "{new_exe_path}"
-        del "{current_exe_path}"
-        ren "{new_exe_path}" "{os.path.basename(current_exe_path)}"
-        start "" "{current_exe_path}"
-        """
-
-        with tempfile.NamedTemporaryFile('w', delete=False, suffix='.bat') as script_file:
-            script_file.write(updater_script)
-            updater_path = script_file.name
-
-        self.show_info_message("Update Ready", "The application will now close and update.")
-        subprocess.Popen(['cmd', '/c', updater_path], creationflags=subprocess.CREATE_NO_WINDOW)
-        QApplication.quit()
 
 
 def exception_hook(exctype, value, tb):
