@@ -2230,15 +2230,19 @@ class CapillaryAnalyzer(QMainWindow):
 
         current_app_path = os.path.abspath(sys.executable)
         current_app_dir = os.path.dirname(os.path.dirname(current_app_path))
-        new_app_path = os.path.join(os.path.dirname(current_app_dir), os.path.basename(app_path))
+        parent_dir = os.path.dirname(current_app_dir)
+        app_name = os.path.basename(current_app_dir)
+        new_app_path = os.path.join(parent_dir, f"{app_name}_new.app")
 
         updater_script = f"""
         #!/bin/bash
         sleep 2
         rm -rf "{current_app_dir}"
         mv "{app_path}" "{new_app_path}"
-        xattr -rc "{new_app_path}"  # Remove quarantine attribute
-        open "{new_app_path}"
+        mv "{new_app_path}" "{current_app_dir}"
+        xattr -rc "{current_app_dir}"
+        chmod -R 755 "{current_app_dir}"
+        open "{current_app_dir}"
         """
 
         with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
@@ -2246,7 +2250,8 @@ class CapillaryAnalyzer(QMainWindow):
             updater_path = script_file.name
         os.chmod(updater_path, 0o755)
 
-        self.show_info_message("Update Ready", "The application will now close and update.")
+        self.show_info_message("Update Ready",
+                               "The application will now close and update. Please restart the application manually after the update.")
         subprocess.Popen(['/bin/bash', updater_path])
         QApplication.quit()
 
