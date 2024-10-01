@@ -1,44 +1,90 @@
-import csv
-import json
-import math
+import logging
 import os
-import pickle
-import platform
-import subprocess
 import sys
-import tempfile
-import traceback
-from urllib.request import urlretrieve
-from PyQt5.QtCore import QPoint
-
-import requests
-from PyQt5.QtCore import QPointF
-from PyQt5.QtCore import QRectF, QLineF, pyqtSignal, QObject, QSize
-from PyQt5.QtCore import QTimer, QBuffer
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QColor
-from PyQt5.QtGui import QPainter, QPen
-from PyQt5.QtGui import QPixmap, QImage, QFont, QPalette, QIcon
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QInputDialog, QVBoxLayout, QHBoxLayout,
-                             QWidget, QGraphicsScene, QGraphicsView, QGraphicsEllipseItem,
-                             QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
-                             QGraphicsItemGroup, QGraphicsItem, QFrame, QGridLayout,
-                             QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect)
-from PyQt5.QtWidgets import QCheckBox, QLineEdit
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
-from PyQt5.QtWidgets import QGraphicsOpacityEffect
-from packaging import version
-
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QPainter, QColor
-import appdirs
-from PyQt5.QtCore import QBuffer, QByteArray
+from logging.handlers import RotatingFileHandler
 
 
+class Logger:
+    def __init__(self, app_name):
+        self.app_name = app_name
+        self.logger = logging.getLogger(app_name)
+        self.logger.setLevel(logging.DEBUG)
+        self.setup_logging()
+
+    def get_log_path(self, filename):
+        if getattr(sys, 'frozen', False):
+            if sys.platform == 'darwin':
+                return os.path.join(os.path.expanduser('~/Library/Logs'), self.app_name, filename)
+            else:
+                return os.path.join(os.path.dirname(sys.executable), 'logs', filename)
+        else:
+            return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', filename)
+
+    def setup_logging(self):
+        log_file = self.get_log_path('app.log')
+        log_dir = os.path.dirname(log_file)
+        os.makedirs(log_dir, exist_ok=True)
+
+        file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+        console_handler = logging.StreamHandler()
+
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+
+    def get_logger(self):
+        return self.logger
 
 
-CURRENT_VERSION = "2.7.5"
+def exception_handler(logger, exc_type, exc_value, exc_traceback):
+    logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    sys.exit(1)
+
+
+# Initialize logger
+app_logger = Logger('PHASe').get_logger()
+sys.excepthook = lambda *args: exception_handler(app_logger, *args)
+
+app_logger.info("Starting PHASe")
+
+try:
+    import csv
+    import json
+    import math
+    import traceback
+    import platform
+    import subprocess
+    import tempfile
+    from urllib.request import urlretrieve
+    import requests
+    from packaging import version
+
+    from PyQt5.QtCore import (Qt, QPoint, QPointF, QRectF, QLineF, pyqtSignal,
+                              QObject, QSize, QTimer, QBuffer, QPropertyAnimation,
+                              QEasingCurve, QByteArray)
+
+    from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor)
+
+    from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QInputDialog,
+                                 QVBoxLayout, QHBoxLayout, QWidget, QGraphicsScene, QGraphicsView,
+                                 QGraphicsTextItem, QGraphicsRectItem, QGraphicsLineItem,
+                                 QGraphicsItemGroup, QGraphicsItem, QFrame, QGridLayout,
+                                 QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect,
+                                 QGraphicsEllipseItem, QCheckBox, QLineEdit, QFileDialog,
+                                 QMessageBox, QGraphicsOpacityEffect)
+
+    app_logger.info("All modules imported successfully")
+
+except ImportError as e:
+    app_logger.error(f"oopsie! Import error: {str(e)}")
+    app_logger.error("contact support with the above error")
+    sys.exit(1)
+
+CURRENT_VERSION = "3.0.5"
+CURRENT_VERSION_NAME = "Hierapolis"
 
 
 def serialize_qt_object(obj):
@@ -53,8 +99,15 @@ def deserialize_qt_object(obj):
     return obj
 
 
+def absolute_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
 
-
+    return os.path.join(base_path, relative_path)
 
 
 class ToastNotification(QWidget):
@@ -155,7 +208,6 @@ class ToastNotification(QWidget):
         super().paintEvent(event)
 
 
-
 class TourGuide(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -201,26 +253,50 @@ class TourGuide(QWidget):
         self.opacity_animation.setStartValue(0)
         self.opacity_animation.setEndValue(1)
         self.opacity_animation.setEasingCurve(QEasingCurve.InOutQuad)
+
     def show_message(self, message, target_widget, custom_pos=None):
         self.message.setText(message)
+
         if custom_pos:
-            self.move(custom_pos)
-            # Show the arrow when using custom position
+            pos = self.adjust_position(custom_pos)
+            self.move(pos)
             self.arrow.show()
-        else:
-            self.adjust_position(target_widget)
-            # Hide the arrow for other tour steps
+        elif target_widget:
+            pos = self.adjust_position(self.get_target_position(target_widget))
+            self.move(pos)
             self.arrow.hide()
+        else:
+            pos = self.adjust_position(self.parent().rect().center() - self.rect().center())
+            self.move(pos)
+            self.arrow.hide()
+
         self.show()
         self.opacity_animation.start()
 
-    def adjust_position(self, target_widget):
+    def get_target_position(self, target_widget):
         if target_widget:
             target_rect = target_widget.rect()
-            target_pos = target_widget.mapToGlobal(target_rect.topLeft())
-            self.move(target_pos.x() + target_rect.width() + 10, target_pos.y())
-        else:
-            self.move(self.parent().rect().center() - self.rect().center())
+            target_pos = target_widget.mapToGlobal(target_rect.topRight())
+            return self.parent().mapFromGlobal(target_pos + QPoint(10, 0))
+        return self.parent().rect().center() - self.rect().center()
+
+    def adjust_position(self, pos):
+        parent_rect = self.parent().rect()
+        guide_rect = self.rect()
+
+        # Adjust x-coordinate
+        if pos.x() + guide_rect.width() > parent_rect.width():
+            pos.setX(parent_rect.width() - guide_rect.width())
+        if pos.x() < 0:
+            pos.setX(0)
+
+        # Adjust y-coordinate
+        if pos.y() + guide_rect.height() > parent_rect.height():
+            pos.setY(parent_rect.height() - guide_rect.height())
+        if pos.y() < 0:
+            pos.setY(0)
+
+        return pos
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -236,15 +312,20 @@ class CustomGraphicsScene(QGraphicsScene):
         super().__init__(parent)
         self.parent = parent
 
-    def update_connection_line(self, label):
-        line = label.data(0)
-        if line:
-            start = QPointF(label.x, label.y)
-            end = label.sceneBoundingRect().center()
-            line.setLine(QLineF(start, end))
+    def update_connection_lines(self):
+        for particle in self.particles:
+            if 'label_item' in particle and 'line_item' in particle:
+                label = particle['label_item']
+                line = particle['line_item']
+                start = QPointF(particle['x'], particle['y'])
+                end = label.sceneBoundingRect().center()
+                line.setLine(QLineF(start, end))
+
 
 class DraggableLabelSignals(QObject):
     deleteRequested = pyqtSignal(object)
+    moved = pyqtSignal(object)
+
 
 
 class ScrollWheel(QWidget):
@@ -324,7 +405,7 @@ class ModernButton(QPushButton):
     def __init__(self, icon_path, text, parent=None):
         super().__init__(parent)
         self.setText(text)
-        self.setIcon(QIcon(icon_path))
+        self.setIcon(QIcon(absolute_path(icon_path)))
         self.setIconSize(QSize(32, 32))
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -489,14 +570,15 @@ class DraggableLabel(QGraphicsItemGroup):
 
 
     def itemChange(self, change, value):
-        if change == QGraphicsItemGroup.ItemPositionHasChanged and self.scene():
-            self.scene().update_connection_line(self)
+        if change == QGraphicsItemGroup.ItemPositionHasChanged:
+            self.signals.moved.emit(self)
         return super().itemChange(change, value)
 
 
 class CapillaryAnalyzer(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.logger = app_logger
         self.setWindowTitle("PHASe - Particle Height Analysis Software")
         self.setGeometry(100, 100, 1400, 900)
         self.setStyleSheet("""
@@ -516,13 +598,14 @@ class CapillaryAnalyzer(QMainWindow):
 
         app_name = "PHASe"
         app_author = "VX Software"
-        self.config_dir = appdirs.user_data_dir(app_name, app_author)
+        self.config_dir = self.get_app_data_dir(app_name, app_author)
         os.makedirs(self.config_dir, exist_ok=True)
         self.config_path = os.path.join(self.config_dir, 'phase_config.json')
 
         self.load_config()
 
-
+        self.ceiling_cursor = self.create_custom_cursor("assets/set_ceiling_btn.svg", QColor(255, 0, 0))
+        self.floor_cursor = self.create_custom_cursor("assets/set_floor_btn.svg", QColor(0, 255, 0))
 
         self.ceiling_ghost_line = None
         self.floor_ghost_line = None
@@ -574,7 +657,7 @@ class CapillaryAnalyzer(QMainWindow):
 
         # Logo space
         logo_label = QLabel()
-        logo_pixmap = QPixmap("assets/phase_logo_v3.svg")
+        logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
         logo_label.setPixmap(logo_pixmap.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignCenter)
         control_layout.addWidget(logo_label)
@@ -710,11 +793,11 @@ class CapillaryAnalyzer(QMainWindow):
         # Reset and Clear buttons
         reset_clear_layout = QHBoxLayout()
 
-        self.reset_angle_button = self.create_small_button("Reset Angle", "assets/reset_icon.svg.svg")
+        self.reset_angle_button = self.create_small_button("Reset Angle", absolute_path("assets/reset_icon.svg"))
         self.reset_angle_button.clicked.connect(self.reset_angle)
         reset_clear_layout.addWidget(self.reset_angle_button)
 
-        self.clear_selections_button = self.create_small_button("Clear All", "assets/clear_icon.svg")
+        self.clear_selections_button = self.create_small_button("Clear All", absolute_path("assets/clear_icon.svg"))
         self.clear_selections_button.clicked.connect(self.clear_selections)
         reset_clear_layout.addWidget(self.clear_selections_button)
 
@@ -816,9 +899,19 @@ class CapillaryAnalyzer(QMainWindow):
             self.show_warning_message("Invalid Input",
                                       "Please enter a valid number followed by a unit (um, mm, or pm).")
 
-
-
-
+    def get_app_data_dir(self, app_name, app_author):
+        if sys.platform == 'win32':
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+            )
+            dir_, _ = winreg.QueryValueEx(key, "Local AppData")
+            return os.path.join(dir_, app_author, app_name)
+        elif sys.platform == 'darwin':
+            return os.path.expanduser(f'~/Library/Application Support/{app_name}')
+        else:
+            return os.path.expanduser(f'~/.local/share/{app_name}')
 
     def parse_input_with_units(self, input_text):
         input_text = input_text.strip().lower()
@@ -866,6 +959,10 @@ class CapillaryAnalyzer(QMainWindow):
         file_menu.addAction(load_workspace_action)
 
         file_menu.addSeparator()
+
+        check_updates_action = QAction('Check for Updates', self)
+        check_updates_action.triggered.connect(self.check_for_updates)
+        file_menu.addAction(check_updates_action)
 
         exit_action = QAction('Exit', self)
         exit_action.triggered.connect(self.close)
@@ -924,10 +1021,10 @@ class CapillaryAnalyzer(QMainWindow):
     def show_about_dialog(self):
         about_text = f"""
         <h2 style='color: white;'>PHASe - Particle Height Analysis Software</h2>
-        <p style='color: white;'>Version: {CURRENT_VERSION}</p>
+        <p style='color: white;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
         <p style='color: white;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
         <p style='color: white;'>Developed by: Alfa Ozaltin @ VX Software</p>
-        <p style='color: white;'>Current Platform: {platform.system()} {platform.release()}</p>
+        <p style='color: white;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
         """
 
         about_box = QMessageBox(self)
@@ -955,7 +1052,7 @@ class CapillaryAnalyzer(QMainWindow):
                 background-color: #3498db;
             }
         """)
-        icon = QPixmap("assets/phase_logo_v3.svg")
+        icon = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
         about_box.setIconPixmap(icon.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         about_box.exec_()
@@ -1270,6 +1367,31 @@ class CapillaryAnalyzer(QMainWindow):
         # Hide the toast after 3 seconds
         QTimer.singleShot(3000, self.toast_label.hide)
 
+    def create_custom_cursor(self, svg_path, color):
+        # Create a base pixmap for the cursor
+        base_pixmap = QPixmap(32, 32)
+        base_pixmap.fill(Qt.transparent)
+
+        # Draw the cross
+        painter = QPainter(base_pixmap)
+        painter.setPen(QPen(Qt.white, 2))
+        painter.drawLine(16, 0, 16, 32)  # Vertical line
+        painter.drawLine(0, 16, 32, 16)  # Horizontal line
+
+        # Load and color the SVG icon
+        icon = QIcon(absolute_path(svg_path))
+        icon_pixmap = icon.pixmap(16, 16)  # Smaller size for the corner icon
+        icon_painter = QPainter(icon_pixmap)
+        icon_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        icon_painter.fillRect(icon_pixmap.rect(), color)
+        icon_painter.end()
+
+        # Draw the icon in the top-right corner
+        painter.drawPixmap(16, 0, icon_pixmap)
+
+        painter.end()
+
+        return QCursor(base_pixmap, 16, 16)  # Hotspot at the center of the cross
 
 
     def hide_toast(self):
@@ -1446,10 +1568,15 @@ class CapillaryAnalyzer(QMainWindow):
                 print(f"Image loaded successfully: {file_name}")
                 print(f"Image size: {self.original_image.width()}x{self.original_image.height()}")
                 print(f"Scale factor: {self.scale_factor}")
+
+                # Automatically start ceiling selection
+                self.set_ceiling_mode()
+
         except Exception as e:
             error_message = f"Error loading image: {str(e)}"
             print(error_message)
             QMessageBox.critical(self, "Error", error_message)
+
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1458,11 +1585,13 @@ class CapillaryAnalyzer(QMainWindow):
 
     def set_ceiling_mode(self):
         self.current_mode = "ceiling"
-        self.graphics_view.viewport().setCursor(Qt.CrossCursor)
+        self.graphics_view.viewport().setCursor(self.ceiling_cursor)
+        self.show_info_message("Set Ceiling", "Click on the image to set the ceiling of the capillary.", legacy=True)
 
     def set_floor_mode(self):
         self.current_mode = "floor"
-        self.graphics_view.viewport().setCursor(Qt.CrossCursor)
+        self.graphics_view.viewport().setCursor(self.floor_cursor)
+        self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
 
 
     def point_to_menu_item(self, menu_name, item_name):
@@ -1503,13 +1632,18 @@ class CapillaryAnalyzer(QMainWindow):
                 self.current_mode = None
                 self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
                 self.update_lines()
+                # Automatically start floor selection after setting ceiling
+                self.set_floor_mode()
             elif self.current_mode == "floor":
                 self.floor_y = scene_pos.y()
                 self.current_mode = None
                 self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
                 self.update_lines()
+                self.show_info_message("Capillary Set",
+                                       "Ceiling and floor have been set. You can now add particles or adjust the capillary height.",
+                                       legacy=True)
             elif not isinstance(self.scene.itemAt(scene_pos, self.graphics_view.transform()),
-                                    (QGraphicsRectItem, QGraphicsTextItem)):
+                                (QGraphicsRectItem, QGraphicsTextItem)):
                 x, y = scene_pos.x(), scene_pos.y()
                 height = self.calculate_height(x, y)
                 label_pos = QPointF(x + 10, y - 60)
@@ -1701,6 +1835,10 @@ class CapillaryAnalyzer(QMainWindow):
 
     def draw_particles(self):
         if self.original_image and self.image_item:
+            # Store existing label positions
+            existing_positions = {particle['label_item']: particle['label_item'].pos() for particle in self.particles if
+                                  'label_item' in particle}
+
             # Remove all existing particle items from the scene
             for particle in self.particles:
                 if 'label_item' in particle:
@@ -1723,23 +1861,29 @@ class CapillaryAnalyzer(QMainWindow):
                 self.scene.addItem(particle_dot)
 
                 label = DraggableLabel(x, y, particle['name'], particle['height'], self)
-                if 'label_pos' in particle:
+
+                # Restore the previous position if it exists, otherwise use the default
+                if 'label_item' in particle and particle['label_item'] in existing_positions:
+                    label.setPos(existing_positions[particle['label_item']])
+                elif 'label_pos' in particle:
                     label.setPos(particle['label_pos'])
                 else:
                     label.setPos(QPointF(x + 10, y - 60))
+
                 label.signals.deleteRequested.connect(self.delete_particle)
+                label.signals.moved.connect(self.update_connection_lines)
                 self.scene.addItem(label)
 
                 # Scale the line width
                 line = QGraphicsLineItem()
                 line.setPen(QPen(QColor(255, 255, 255), max(1, int(self.scale_factor)), Qt.DashLine))
                 self.scene.addItem(line)
-                label.setData(0, line)
 
                 particle['label_item'] = label
                 particle['dot_item'] = particle_dot
                 particle['line_item'] = line
 
+            self.update_connection_lines()
             self.scene.update()
 
 
@@ -1795,8 +1939,14 @@ class CapillaryAnalyzer(QMainWindow):
 
         self.scene.update()
 
-
-
+    def update_connection_lines(self):
+        for particle in self.particles:
+            if 'label_item' in particle and 'line_item' in particle:
+                label = particle['label_item']
+                line = particle['line_item']
+                start = QPointF(particle['x'], particle['y'])
+                end = label.sceneBoundingRect().center()
+                line.setLine(QLineF(start, end))
 
 
 
@@ -1855,7 +2005,9 @@ class CapillaryAnalyzer(QMainWindow):
             else:
                 pass
         except Exception as e:
-            self.show_error_message("Update Check Failed", f"Failed to check for updates: {str(e)}")
+            self.show_error_message("Update Check Failed", f"Check your connection and retry.")
+            print(f"error message shown from function check_for_updates with exception: {e}")
+
 
     def download_and_install_update(self, release):
         try:
@@ -1901,7 +2053,8 @@ class CapillaryAnalyzer(QMainWindow):
             QApplication.quit()
 
         except Exception as e:
-            self.show_error_message("Update Failed", f"Failed to download and prepare the update: {str(e)}")
+            self.show_error_message("Update Failed", f"Failed to download and prepare the update.")
+            print(f"error message shown from function download_and_install_update with exception: {e}")
 
 
 def exception_hook(exctype, value, tb):
@@ -1910,19 +2063,19 @@ def exception_hook(exctype, value, tb):
 
 
 if __name__ == "__main__":
-    sys.excepthook = exception_hook
     try:
+        app_logger.info("Application starting...")
         app = QApplication(sys.argv)
 
-        # Make the menu bar native on macOS
         if platform.system() == 'Darwin':
             app.setAttribute(Qt.AA_DontUseNativeMenuBar, False)
 
+        app_logger.info("Creating main window...")
         window = CapillaryAnalyzer()
+        app_logger.info("Showing main window...")
         window.show()
+        app_logger.info("Entering main event loop...")
         sys.exit(app.exec_())
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        print("Traceback:")
-        traceback.print_exc()
+        app_logger.exception("An unexpected error occurred:")
         sys.exit(1)
