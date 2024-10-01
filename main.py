@@ -2188,6 +2188,7 @@ class CapillaryAnalyzer(QMainWindow):
 
     def download_and_install_update(self, release):
         try:
+            # Determine the correct asset based on the platform
             if platform.system() == 'Darwin':
                 asset_suffix = '_osx64app.zip'
             elif platform.system() == 'Windows':
@@ -2195,27 +2196,33 @@ class CapillaryAnalyzer(QMainWindow):
             else:
                 raise Exception("Unsupported platform for auto-update")
 
+            # Find the correct asset
             update_asset = next((asset for asset in release['assets'] if asset['name'].endswith(asset_suffix)), None)
             if not update_asset:
                 raise Exception(f"No suitable download found for {platform.system()} in the release")
 
+            # Get the download URL
             download_url = update_asset['browser_download_url']
 
-            # Get the path to the updater script
+            # Get the path to the updater script and the current executable
             if getattr(sys, 'frozen', False):
-                application_path = sys._MEIPASS
+                # Running as bundled app
+                if platform.system() == 'Darwin':
+                    current_app_path = os.path.join(sys._MEIPASS, 'MacOS', 'PHASe')
+                else:
+                    current_app_path = sys.executable
+                updater_path = os.path.join(sys._MEIPASS, 'updater.py')
             else:
-                application_path = os.path.dirname(os.path.abspath(__file__))
+                # Running as script
+                current_app_path = sys.executable
+                updater_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'updater.py')
 
-            updater_script = os.path.join(application_path, 'run_updater.sh')
-
-            os.chmod(updater_script, 0o755)
-
-            current_app_path = sys.executable
-            subprocess.Popen(['/bin/bash', updater_script, download_url, current_app_path])
+            # Run the updater
+            updater_command = [current_app_path, updater_path, download_url, current_app_path]
+            subprocess.Popen(updater_command)
 
             self.show_info_message("Update Started",
-                                   "The updater has been launched in a separate window. This application will now close.")
+                                   "The updater has been launched in a separate window. This application will now close. Please follow the instructions in the updater window.")
             QApplication.quit()
 
         except Exception as e:
