@@ -84,7 +84,7 @@ except ImportError as e:
 
 '''End Imports'''
 
-CURRENT_VERSION = "3.0.5b"
+CURRENT_VERSION = "3.0.5"
 CURRENT_VERSION_NAME = "Hierapolis"
 
 
@@ -2112,11 +2112,40 @@ class CapillaryAnalyzer(QMainWindow):
             latest_version = latest_release['tag_name'].lstrip('v')
 
             if version.parse(latest_version) > version.parse(CURRENT_VERSION):
+                if platform.system() == 'Darwin':
+                    asset_suffix = '_osx64app.zip'
+                elif platform.system() == 'Windows':
+                    asset_suffix = '_win64.zip'
+                else:
+                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained", message_type="warning")
+                    return
+
+                suitable_asset = any(asset['name'].endswith(asset_suffix) for asset in latest_release['assets'])
+                if not suitable_asset:
+                    self.show_toast("No suitable update available for your platform", message_type="warning")
+                    return
                 message = f"A new version ({latest_version}) is available. You are currently using version {CURRENT_VERSION}. Do you want to download and install the update?"
                 self.show_info_message("Update Available", message, buttons=['Yes', 'No'],
                                        callback=lambda response: self.handle_update_response(response, latest_release))
+
             elif version.parse(latest_version) < version.parse(CURRENT_VERSION):
-                self.show_toast(message=f"You are currently using an unreleased or beta version: {CURRENT_VERSION}", message_type="warning")
+                if platform.system() == 'Darwin':
+                    asset_suffix = '_osx64app.zip'
+                elif platform.system() == 'Windows':
+                    asset_suffix = '_win64.zip'
+                else:
+                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained", message_type="warning")
+                    return
+
+                suitable_asset = any(asset['name'].endswith(asset_suffix) for asset in latest_release['assets'])
+                if not suitable_asset:
+                    self.show_toast("update modal triggered, but no asset was found.", message_type="warning")
+                    return
+
+                message = f"A new version ({latest_version}) is available. You are currently using version {CURRENT_VERSION}. Do you want to download and install the update?"
+                self.show_info_message("Beta Update Modal", message, buttons=['Yes', 'No'],
+                                       callback=lambda response: self.handle_update_response(response, latest_release))
+
             else:
                 self.show_toast(message="You are using the latest version", message_type="info")
 
@@ -2136,53 +2165,95 @@ class CapillaryAnalyzer(QMainWindow):
         else:
             self.show_toast("Update cancelled", message_type="info")
 
-
     def download_and_install_update(self, release):
         try:
-            # Find the .app asset
-            app_asset = next((asset for asset in release['assets'] if asset['name'].endswith('_osx64app.zip')), None)
-            if not app_asset:
-                raise Exception("No .app download found in the release")
+            # Determine the correct asset based on the platform
+            if platform.system() == 'Darwin':
+                asset_suffix = '_osx64app.zip'
+            elif platform.system() == 'Windows':
+                asset_suffix = '_win64.zip'
+            else:
+                raise Exception("Unsupported platform for auto-update")
+
+            # Find the correct asset
+            update_asset = next((asset for asset in release['assets'] if asset['name'].endswith(asset_suffix)), None)
+            if not update_asset:
+                raise Exception(f"No suitable download found for {platform.system()} in the release")
 
             # Download the update
             with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
                 self.show_info_message("Downloading Update", "The update is being downloaded. Please wait...")
-                urlretrieve(app_asset['browser_download_url'], tmp_file.name)
+                urlretrieve(update_asset['browser_download_url'], tmp_file.name)
 
             update_dir = tempfile.mkdtemp()
-            subprocess.run(['unzip', '-q', tmp_file.name, '-d', update_dir])
 
-            app_path = next((os.path.join(root, name)
-                             for root, dirs, files in os.walk(update_dir)
-                             for name in dirs if name.endswith('.app')), None)
-            if not app_path:
-                raise Exception("Could not find .app in the downloaded update")
+            # Extract the downloaded zip
+            with zipfile.ZipFile(tmp_file.name, 'r') as zip_ref:
+                zip_ref.extractall(update_dir)
 
-            current_app_path = os.path.abspath(sys.executable)
-            current_app_dir = os.path.dirname(os.path.dirname(current_app_path))
-            new_app_path = os.path.join(os.path.dirname(current_app_dir), os.path.basename(app_path))
-
-            updater_script = f"""
-            #!/bin/bash
-            sleep 2
-            rm -rf "{current_app_dir}"
-            mv "{app_path}" "{new_app_path}"
-            open "{new_app_path}"
-            """
-
-            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
-                script_file.write(updater_script)
-                updater_path = script_file.name
-            os.chmod(updater_path, 0o755)
-
-            self.show_info_message("Update Ready",
-                                   "The update has been downloaded and is ready to install. The application will now close and update.")
-            subprocess.Popen(['/bin/bash', updater_path])
-            QApplication.quit()
+            if platform.system() == 'Darwin':
+                self.install_update_macos(update_dir)
+            elif platform.system() == 'Windows':
+                self.install_update_windows(update_dir)
 
         except Exception as e:
-            self.show_error_message("Update Failed", f"Failed to download and prepare the update.")
-            print(f"error message shown from function download_and_install_update with exception: {e}")
+            self.show_error_message("Update Failed", f"Update Failed: {str(e)}")
+            print(f"Error in download_and_install_update: {e}")
+
+    def install_update_macos(self, update_dir):
+        app_path = next((os.path.join(root, name)
+                         for root, dirs, files in os.walk(update_dir)
+                         for name in dirs if name.endswith('.app')), None)
+        if not app_path:
+            raise Exception("Could not find .app in the downloaded update")
+
+        current_app_path = os.path.abspath(sys.executable)
+        current_app_dir = os.path.dirname(os.path.dirname(current_app_path))
+        new_app_path = os.path.join(os.path.dirname(current_app_dir), os.path.basename(app_path))
+
+        updater_script = f"""
+        #!/bin/bash
+        sleep 2
+        rm -rf "{current_app_dir}"
+        mv "{app_path}" "{new_app_path}"
+        open "{new_app_path}"
+        """
+
+        with tempfile.NamedTemporaryFile('w', delete=False, suffix='.sh') as script_file:
+            script_file.write(updater_script)
+            updater_path = script_file.name
+        os.chmod(updater_path, 0o755)
+
+        self.show_info_message("Update Ready", "The application will now close and update.")
+        subprocess.Popen(['/bin/bash', updater_path])
+        QApplication.quit()
+
+    def install_update_windows(self, update_dir):
+        exe_path = next((os.path.join(root, name)
+                         for root, dirs, files in os.walk(update_dir)
+                         for name in files if name.endswith('.exe')), None)
+        if not exe_path:
+            raise Exception("Could not find .exe in the downloaded update")
+
+        current_exe_path = os.path.abspath(sys.executable)
+        new_exe_path = os.path.join(os.path.dirname(current_exe_path), 'PHASe_new.exe')
+
+        updater_script = f"""
+        @echo off
+        timeout /t 2 /nobreak
+        move /y "{exe_path}" "{new_exe_path}"
+        del "{current_exe_path}"
+        ren "{new_exe_path}" "{os.path.basename(current_exe_path)}"
+        start "" "{current_exe_path}"
+        """
+
+        with tempfile.NamedTemporaryFile('w', delete=False, suffix='.bat') as script_file:
+            script_file.write(updater_script)
+            updater_path = script_file.name
+
+        self.show_info_message("Update Ready", "The application will now close and update.")
+        subprocess.Popen(['cmd', '/c', updater_path], creationflags=subprocess.CREATE_NO_WINDOW)
+        QApplication.quit()
 
 
 def exception_hook(exctype, value, tb):
