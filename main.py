@@ -2206,9 +2206,6 @@ class CapillaryAnalyzer(QMainWindow):
 
             # Get the path to the updater script
             if getattr(sys, 'frozen', False):
-                # If the application is run as a bundle, the pyInstaller bootloader
-                # extends the sys module by a flag frozen=True and sets the app
-                # path into variable _MEIPASS'.
                 application_path = sys._MEIPASS
             else:
                 application_path = os.path.dirname(os.path.abspath(__file__))
@@ -2220,13 +2217,12 @@ class CapillaryAnalyzer(QMainWindow):
             subprocess.Popen([sys.executable, updater_path, download_url, current_app_path])
 
             self.show_info_message("Update Started",
-                                   "The updater has been launched. The application will now close. Please restart it after the update is complete.")
+                                   "The updater has been launched in a separate window. This application will now close. Please follow the instructions in the updater window.")
             QApplication.quit()
 
         except Exception as e:
             self.show_error_message("Update Failed", f"Update Failed: {str(e)}")
             print(f"Error in download_and_install_update: {e}")
-
 
 def exception_hook(exctype, value, tb):
     print(''.join(traceback.format_exception(exctype, value, tb)))
