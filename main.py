@@ -579,6 +579,7 @@ class CapillaryAnalyzer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.logger = app_logger
+        self.image_loaded = False
         self.setWindowTitle("PHASe - Particle Height Analysis Software")
         self.setGeometry(100, 100, 1400, 900)
         self.setStyleSheet("""
@@ -1330,7 +1331,7 @@ class CapillaryAnalyzer(QMainWindow):
         # Update scene
         self.scene.update()
 
-    def show_toast(self, message, message_type):
+    def show_toast(self, message, message_type, timeout=3000):
         if not hasattr(self, 'toast_label') or self.toast_label is None:
             self.toast_label = QLabel(self)
             self.toast_label.setAlignment(Qt.AlignCenter)
@@ -1365,7 +1366,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.toast_label.show()
 
         # Hide the toast after 3 seconds
-        QTimer.singleShot(3000, self.toast_label.hide)
+        QTimer.singleShot(timeout, self.toast_label.hide)
 
     def create_custom_cursor(self, svg_path, color):
         # Create a base pixmap for the cursor
@@ -1437,6 +1438,8 @@ class CapillaryAnalyzer(QMainWindow):
 
 
     def toggle_wall_thickness(self, state):
+        if not self.check_image_loaded():
+            return
         self.wall_thickness_input.setEnabled(state == Qt.Checked)
         if state != Qt.Checked:
             self.wall_thickness = 0
@@ -1462,6 +1465,8 @@ class CapillaryAnalyzer(QMainWindow):
         self.update_lines()
 
     def update_wall_thickness(self):
+        if not self.check_image_loaded():
+            return
         thickness = self.parse_input_with_units(self.wall_thickness_input.text())
         if thickness is not None:
             if thickness >= 0:
@@ -1505,6 +1510,8 @@ class CapillaryAnalyzer(QMainWindow):
             pass
 
     def update_angle(self, value, is_fine):
+        if not self.check_image_loaded():
+            return
         if is_fine:
             self.angle_value += value
         else:
@@ -1528,6 +1535,8 @@ class CapillaryAnalyzer(QMainWindow):
         self.update_lines()
 
     def set_angle_from_input(self):
+        if not self.check_image_loaded():
+            return
         try:
             angle = float(self.angle_input.text())
             if -90 <= angle <= 90:
@@ -1566,6 +1575,7 @@ class CapillaryAnalyzer(QMainWindow):
                 self.floor_y = None
 
                 print(f"Image loaded successfully: {file_name}")
+                self.image_loaded = True
                 print(f"Image size: {self.original_image.width()}x{self.original_image.height()}")
                 print(f"Scale factor: {self.scale_factor}")
 
@@ -1584,13 +1594,21 @@ class CapillaryAnalyzer(QMainWindow):
             self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     def set_ceiling_mode(self):
+        if not self.check_image_loaded():
+            return
         self.current_mode = "ceiling"
         self.graphics_view.viewport().setCursor(self.ceiling_cursor)
+        self.graphics_view.viewport().update()  # Force an update
+        QApplication.processEvents()  # Process any pending events
         self.show_info_message("Set Ceiling", "Click on the image to set the ceiling of the capillary.", legacy=True)
 
     def set_floor_mode(self):
+        if not self.check_image_loaded():
+            return
         self.current_mode = "floor"
         self.graphics_view.viewport().setCursor(self.floor_cursor)
+        self.graphics_view.viewport().update()
+        QApplication.processEvents()
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
 
 
@@ -1622,40 +1640,48 @@ class CapillaryAnalyzer(QMainWindow):
 
                 QTimer.singleShot(5000, arrow.deleteLater)
 
-
     def mousePressEvent(self, event):
+        if not self.image_loaded:
+            self.show_toast("Please load an image first.", message_type="error", timeout=3000)
+            return
         if self.original_image and self.graphics_view.underMouse():
             scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
 
             if self.current_mode == "ceiling":
                 self.ceiling_y = scene_pos.y()
                 self.current_mode = None
+                self.graphics_view.viewport().setCursor(Qt.BlankCursor)
+                QApplication.processEvents()
                 self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
+                self.graphics_view.viewport().update()
+                QApplication.processEvents()
                 self.update_lines()
-                # Automatically start floor selection after setting ceiling
                 self.set_floor_mode()
             elif self.current_mode == "floor":
                 self.floor_y = scene_pos.y()
+                self.graphics_view.viewport().setCursor(Qt.BlankCursor)
+                QApplication.processEvents()
                 self.current_mode = None
                 self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
+                self.graphics_view.viewport().update()
+                QApplication.processEvents()
                 self.update_lines()
-                self.show_info_message("Capillary Set",
-                                       "Ceiling and floor have been set. You can now add particles or adjust the capillary height.",
+                self.show_info_message("",
+                                       "Ceiling and floor have been set.",
                                        legacy=True)
-            elif not isinstance(self.scene.itemAt(scene_pos, self.graphics_view.transform()),
-                                (QGraphicsRectItem, QGraphicsTextItem)):
+            else:  # particle adding
                 x, y = scene_pos.x(), scene_pos.y()
                 height = self.calculate_height(x, y)
-                label_pos = QPointF(x + 10, y - 60)
-                new_particle = {
+                particle = {
                     'x': x,
                     'y': y,
-                    'name': '',
+                    'name': f'Particle {len(self.particles) + 1}',
                     'height': height,
-                    'label_pos': label_pos
+                    'label_pos': QPointF(x + 10, y - 60)
                 }
-                self.particles.append(new_particle)
+                self.particles.append(particle)
                 self.draw_particles()
+                self.show_info_message("Particle Added", f"Particle added at ({x:.2f}, {y:.2f})", legacy=True)
 
     def update_particle_name(self, label, new_name):
         for particle in self.particles:
@@ -1713,6 +1739,8 @@ class CapillaryAnalyzer(QMainWindow):
 
 
     def set_height(self):
+        if not self.check_image_loaded():
+            return
         dialog = self.create_styled_input_dialog("Set Capillary Height", "(mm, um, pm):")
         if dialog.exec_() == QInputDialog.Accepted:
             height = dialog.textValue().replace(" ", "").lower()
@@ -1895,7 +1923,10 @@ class CapillaryAnalyzer(QMainWindow):
 
     def show_info_message(self, title, message, buttons=None, callback=None, timeout=5000, legacy=False):
         if legacy:
-            self.show_toast(f"{title}: {message}", message_type="info")
+            if len(title) == 0:
+                self.show_toast(message=message, message_type="info", timeout=timeout - 1000)
+            else:
+                self.show_toast(message=f"{title}: {message}", message_type="info", timeout=timeout - 1000)
         else:
             toast = ToastNotification(self, title, message, buttons, timeout=timeout)
             if buttons:
@@ -1954,6 +1985,9 @@ class CapillaryAnalyzer(QMainWindow):
         self.used_names.add(name)
 
     def export_csv(self):
+        if not self.check_image_loaded():
+            self.show_toast("Nothing to export", message_type="warning", timeout=3000)
+            return
         if not self.particles:
             self.show_warning_message("Export Error", "No particles to export.")
             return
@@ -2007,6 +2041,12 @@ class CapillaryAnalyzer(QMainWindow):
         except Exception as e:
             self.show_error_message("Update Check Failed", f"Check your connection and retry.")
             print(f"error message shown from function check_for_updates with exception: {e}")
+
+    def check_image_loaded(self):
+        if not self.image_loaded:
+            self.show_toast("Please load an image first", message_type="error", timeout=3000)
+            return False
+        return True
 
 
     def download_and_install_update(self, release):
