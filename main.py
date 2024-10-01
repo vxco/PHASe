@@ -65,7 +65,7 @@ try:
 
     from PyQt5.QtCore import (Qt, QPoint, QPointF, QRectF, QLineF, pyqtSignal,
                               QObject, QSize, QTimer, QBuffer, QPropertyAnimation,
-                              QEasingCurve, QByteArray)
+                              QEasingCurve, QByteArray, QEventLoop)
 
     from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor)
 
@@ -191,6 +191,9 @@ class ToastNotification(QWidget):
         self.timer.timeout.connect(self.fade_out)
         self.timer.setSingleShot(True)
 
+        self.response = None
+        self.event_loop = None
+
     def showEvent(self, event):
         super().showEvent(event)
         self.fade_in_animation.start()
@@ -209,6 +212,17 @@ class ToastNotification(QWidget):
         painter.drawRoundedRect(self.rect(), 10, 10)
 
         super().paintEvent(event)
+
+    def get_response(self):
+        self.event_loop = QEventLoop()
+        self.event_loop.exec_()
+        return self.response
+
+    def button_clicked(self, text):
+        self.response = text
+        if self.event_loop:
+            self.event_loop.quit()
+        self.fade_out()
 
 
 class TourGuide(QWidget):
@@ -2020,15 +2034,20 @@ class CapillaryAnalyzer(QMainWindow):
             else:
                 self.show_toast(message=f"{title}: {message}", message_type="info", timeout=timeout)
         else:
-            toast = ToastNotification(self, title, message, buttons, timeout=timeout)
+            toast = ToastNotification(self, title, message, buttons)
             if buttons:
                 for button_text, button in toast.buttons.items():
-                    button.clicked.connect(
-                        lambda checked, text=button_text: self.handle_toast_response(toast, text, callback))
+                    button.clicked.connect(lambda checked, text=button_text: toast.button_clicked(text))
             toast.show()
 
-    def handle_toast_response(self, toast, response, callback):
-        toast.fade_out()
+            if buttons:
+                response = toast.get_response()
+                if callback:
+                    callback(response)
+            else:
+                QTimer.singleShot(timeout, toast.fade_out)
+
+    def handle_toast_response(self, response, callback):
         if callback:
             callback(response)
 
