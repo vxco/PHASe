@@ -86,7 +86,7 @@ except ImportError as e:
 
 '''End Imports'''
 
-CURRENT_VERSION = "3.0.5"
+CURRENT_VERSION = "3.0.6"
 CURRENT_VERSION_NAME = "Hierapolis"
 
 
