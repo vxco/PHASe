@@ -2237,6 +2237,7 @@ class CapillaryAnalyzer(QMainWindow):
         sleep 2
         rm -rf "{current_app_dir}"
         mv "{app_path}" "{new_app_path}"
+        xattr -rc "{new_app_path}"  # Remove quarantine attribute
         open "{new_app_path}"
         """
 
