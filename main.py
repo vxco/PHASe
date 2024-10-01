@@ -3,7 +3,6 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 
-
 class Logger:
     def __init__(self, app_name):
         self.app_name = app_name
@@ -74,7 +73,7 @@ try:
                                  QGraphicsItemGroup, QGraphicsItem, QFrame, QGridLayout,
                                  QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect,
                                  QGraphicsEllipseItem, QCheckBox, QLineEdit, QFileDialog,
-                                 QMessageBox, QGraphicsOpacityEffect)
+                                 QMessageBox, QGraphicsOpacityEffect, QSlider)
 
     app_logger.info("All modules imported successfully")
 
@@ -83,7 +82,9 @@ except ImportError as e:
     app_logger.error("contact support with the above error")
     sys.exit(1)
 
-CURRENT_VERSION = "3.0.5"
+'''End Imports'''
+
+CURRENT_VERSION = "3.0.5b"
 CURRENT_VERSION_NAME = "Hierapolis"
 
 
@@ -448,7 +449,7 @@ class DraggableLabel(QGraphicsItemGroup):
         self.create_label()
 
     def create_label(self):
-        font_size = 14
+        font_size = 14  # Fixed font size
         label_text = self.get_label_text()
         label = QGraphicsTextItem(label_text)
         font = QFont("Arial", font_size)
@@ -478,7 +479,6 @@ class DraggableLabel(QGraphicsItemGroup):
         delete_cross.setFont(QFont("Arial", delete_button_size - 4, QFont.Bold))
         delete_cross.setDefaultTextColor(QColor(255, 255, 255))
 
-        # Center the cross in the delete button
         cross_rect = delete_cross.boundingRect()
         cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
         cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
@@ -490,7 +490,11 @@ class DraggableLabel(QGraphicsItemGroup):
         self.addToGroup(delete_cross)
         self.delete_button = delete_button
 
-        self.setPos(self.x + 10, self.y - total_height - 10)
+        # Apply a fixed scale to ensure consistent size across different resolutions
+        scale_factor = 1 / self.analyzer.scale_factor
+        self.setScale(scale_factor)
+
+        self.setPos(self.x + 10 / scale_factor, self.y - total_height * scale_factor - 10 / scale_factor)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -597,6 +601,9 @@ class CapillaryAnalyzer(QMainWindow):
         main_layout = QHBoxLayout()
         main_widget.setLayout(main_layout)
 
+
+
+
         app_name = "PHASe"
         app_author = "VX Software"
         self.config_dir = self.get_app_data_dir(app_name, app_author)
@@ -655,6 +662,8 @@ class CapillaryAnalyzer(QMainWindow):
                 """)
         control_layout = QVBoxLayout(control_panel)
         self.angle_control = None
+
+
 
         # Logo space
         logo_label = QLabel()
@@ -737,6 +746,7 @@ class CapillaryAnalyzer(QMainWindow):
             }
         """)
         self.wall_thickness_input.textChanged.connect(self.update_wall_thickness)
+
         self.wall_thickness_input.setEnabled(False)
         height_wall_layout.addWidget(self.wall_thickness_input, 2, 1)
 
@@ -816,13 +826,25 @@ class CapillaryAnalyzer(QMainWindow):
             }
         """)
         self.scene = CustomGraphicsScene(self)
+
         self.graphics_view.setScene(self.scene)
         self.graphics_view.setRenderHint(QPainter.Antialiasing)
         self.graphics_view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.graphics_view.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
 
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.graphics_view)
+
+        slider_layout = QHBoxLayout()
+        slider_layout.addStretch(1)
+        self.label_size_slider = self.create_label_size_slider()
+        slider_layout.addWidget(QLabel("Label Size:"))
+        slider_layout.addWidget(self.label_size_slider)
+
+        right_layout.addLayout(slider_layout)
+
         main_layout.addWidget(control_panel, 1)
-        main_layout.addWidget(self.graphics_view, 3)
+        main_layout.addLayout(right_layout, 3)
 
         self.original_image = None
         self.image_item = None
@@ -1218,6 +1240,39 @@ class CapillaryAnalyzer(QMainWindow):
         widget.setGraphicsEffect(effect)
         QTimer.singleShot(5000, lambda: widget.setGraphicsEffect(None))
 
+    def create_label_size_slider(self):
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(10)
+        slider.setMaximum(600)
+        slider.setValue(100)
+        slider.setTickPosition(QSlider.TicksBelow)
+        slider.setTickInterval(25)
+        slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #B1B1B1, stop:1 #c4c4c4);
+                margin: 2px 0;
+            }
+            QSlider::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #b4b4b4, stop:1 #8f8f8f);
+                border: 1px solid #5c5c5c;
+                width: 18px;
+                margin: -2px 0;
+                border-radius: 3px;
+            }
+        """)
+        slider.valueChanged.connect(self.update_label_size)
+        return slider
+
+    def update_label_size(self, value):
+        scale = value / 100.0
+        for particle in self.particles:
+            if 'label_item' in particle:
+                particle['label_item'].setScale(scale)
+        self.update_connection_lines()
+        self.scene.update()
+
     def save_workspace(self):
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Workspace", "", "PHASe Workspace Files (*.phw)")
         if file_name:
@@ -1436,7 +1491,6 @@ class CapillaryAnalyzer(QMainWindow):
             palette.setColor(QPalette.Text, QColor(255, 0, 0))  # Red text for invalid input
             input_widget.setPalette(palette)
 
-
     def toggle_wall_thickness(self, state):
         if not self.check_image_loaded():
             return
@@ -1445,6 +1499,43 @@ class CapillaryAnalyzer(QMainWindow):
             self.wall_thickness = 0
             self.wall_thickness_input.clear()
         self.update_lines()
+
+    def set_wall_thickness(self):
+        if not self.check_image_loaded():
+            return
+        dialog = self.create_styled_input_dialog("Set Wall Thickness", "(mm, um, pm):")
+        if dialog.exec_() == QInputDialog.Accepted:
+            thickness = dialog.textValue().replace(" ", "").lower()
+            unit_start = 0
+            for i, char in enumerate(thickness):
+                if not (char.isdigit() or char == '.'):
+                    unit_start = i
+                    break
+
+            if unit_start == 0:
+                self.show_warning_message("Invalid Input", "Please enter a number followed by a unit (mm, um, or pm).")
+                return
+
+            try:
+                value = float(thickness[:unit_start])
+                unit = thickness[unit_start:]
+
+                if unit == 'um':
+                    self.wall_thickness = value
+                elif unit == 'mm':
+                    self.wall_thickness = value * 1000
+                elif unit == 'pm':
+                    self.wall_thickness = value / 1000
+                else:
+                    self.show_warning_message("Invalid Unit", "Please use um, mm, or pm.")
+                    return
+
+                self.wall_thickness_input.setText(f"{self.wall_thickness:.2f}")
+                self.show_info_message("Wall Thickness Set", f"Wall thickness set to {self.wall_thickness} µm")
+                self.update_lines()  # Update lines after setting the wall thickness
+            except ValueError:
+                self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
+
 
     def reset_angle(self):
         self.angle_value = 0
@@ -1675,13 +1766,12 @@ class CapillaryAnalyzer(QMainWindow):
                 particle = {
                     'x': x,
                     'y': y,
-                    'name': f'Particle {len(self.particles) + 1}',
+                    'name': f'P{len(self.particles) + 1}',
                     'height': height,
                     'label_pos': QPointF(x + 10, y - 60)
                 }
                 self.particles.append(particle)
                 self.draw_particles()
-                self.show_info_message("Particle Added", f"Particle added at ({x:.2f}, {y:.2f})", legacy=True)
 
     def update_particle_name(self, label, new_name):
         for particle in self.particles:
@@ -1924,9 +2014,9 @@ class CapillaryAnalyzer(QMainWindow):
     def show_info_message(self, title, message, buttons=None, callback=None, timeout=5000, legacy=False):
         if legacy:
             if len(title) == 0:
-                self.show_toast(message=message, message_type="info", timeout=timeout - 1000)
+                self.show_toast(message=message, message_type="info", timeout=timeout)
             else:
-                self.show_toast(message=f"{title}: {message}", message_type="info", timeout=timeout - 1000)
+                self.show_toast(message=f"{title}: {message}", message_type="info", timeout=timeout)
         else:
             toast = ToastNotification(self, title, message, buttons, timeout=timeout)
             if buttons:
@@ -2005,7 +2095,7 @@ class CapillaryAnalyzer(QMainWindow):
                             particle['y'],
                             f"{particle['height']:.2f}"
                         ])
-                self.show_info_message("Export Successful", f"Data exported to {file_name}")
+                self.show_info_message("Export Successful", f"Data exported to {file_name}", buttons=['OK'])
             except Exception as e:
                 self.show_error_message("Export Error", f"Error exporting data: {str(e)}")
 
@@ -2022,22 +2112,14 @@ class CapillaryAnalyzer(QMainWindow):
             latest_version = latest_release['tag_name'].lstrip('v')
 
             if version.parse(latest_version) > version.parse(CURRENT_VERSION):
-                message = f"A new version ({latest_version}) is available!\n"
-                message += f"You are currently using version {CURRENT_VERSION}.\n"
-                message += "Do you want to download and install the update?"
-
-                update_box = QMessageBox(self)
-                update_box.setStyleSheet(self.message_box_style)
-                update_box.setIcon(QMessageBox.Question)
-                update_box.setWindowTitle("Update Available")
-                update_box.setText(message)
-                update_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-
-                result = update_box.exec_()
-                if result == QMessageBox.Yes:
-                    self.download_and_install_update(latest_release)
+                message = f"A new version ({latest_version}) is available. You are currently using version {CURRENT_VERSION}. Do you want to download and install the update?"
+                self.show_info_message("Update Available", message, buttons=['Yes', 'No'],
+                                       callback=lambda response: self.handle_update_response(response, latest_release))
+            elif version.parse(latest_version) < version.parse(CURRENT_VERSION):
+                self.show_toast(message=f"You are currently using an unreleased or beta version: {CURRENT_VERSION}", message_type="warning")
             else:
-                pass
+                self.show_toast(message="You are using the latest version", message_type="info")
+
         except Exception as e:
             self.show_error_message("Update Check Failed", f"Check your connection and retry.")
             print(f"error message shown from function check_for_updates with exception: {e}")
@@ -2047,6 +2129,12 @@ class CapillaryAnalyzer(QMainWindow):
             self.show_toast("Please load an image first", message_type="error", timeout=3000)
             return False
         return True
+
+    def handle_update_response(self, response, latest_release):
+        if response == 'Yes':
+            self.download_and_install_update(latest_release)
+        else:
+            self.show_toast("Update cancelled", message_type="info")
 
 
     def download_and_install_update(self, release):
