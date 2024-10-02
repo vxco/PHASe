@@ -2,7 +2,11 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
-import zipfile
+
+CURRENT_VERSION = "3.0.7"
+CURRENT_VERSION_NAME = "Hierapolis"
+FAST_BOOT = True
+BETA_FEATURES_ENABLED = False
 
 
 class Logger:
@@ -75,7 +79,8 @@ try:
                                  QGraphicsItemGroup, QGraphicsItem, QFrame, QGridLayout,
                                  QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect,
                                  QGraphicsEllipseItem, QCheckBox, QLineEdit, QFileDialog,
-                                 QMessageBox, QGraphicsOpacityEffect, QSlider)
+                                 QMessageBox, QGraphicsOpacityEffect, QSlider, QDialog, QComboBox, QGroupBox,
+                                 QFormLayout)
 
     app_logger.info("All modules imported successfully")
 
@@ -86,14 +91,12 @@ except ImportError as e:
 
 '''End Imports'''
 
-CURRENT_VERSION = "3.0.6"
-CURRENT_VERSION_NAME = "Hierapolis"
-
 
 def serialize_qt_object(obj):
     if isinstance(obj, QPointF):
         return {'__type__': 'QPointF', 'x': obj.x(), 'y': obj.y()}
     return str(obj)
+
 
 def deserialize_qt_object(obj):
     if isinstance(obj, dict) and '__type__' in obj:
@@ -344,7 +347,6 @@ class DraggableLabelSignals(QObject):
     moved = pyqtSignal(object)
 
 
-
 class ScrollWheel(QWidget):
     valueChanged = pyqtSignal(float)
 
@@ -417,7 +419,6 @@ class ScrollWheel(QWidget):
         self.valueChanged.emit(self.value)
 
 
-
 class ModernButton(QPushButton):
     def __init__(self, icon_path, text, parent=None):
         super().__init__(parent)
@@ -462,6 +463,7 @@ class DraggableLabel(QGraphicsItemGroup):
         self.analyzer = analyzer
         self.signals = DraggableLabelSignals()
         self.delete_button = None
+        self.notes = ""
         self.create_label()
 
     def create_label(self):
@@ -523,12 +525,14 @@ class DraggableLabel(QGraphicsItemGroup):
     def show_context_menu(self, pos):
         menu = QMenu()
         rename_action = menu.addAction("Rename")
-        delete_action = menu.addAction("Delete")
-
-        # Add submenu for previously used names
         names_submenu = menu.addMenu("Select Name")
         for name in self.analyzer.used_names:
             names_submenu.addAction(name)
+
+        notes_action = menu.addAction("Notes...") if BETA_FEATURES_ENABLED else None
+
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
 
         action = menu.exec_(pos)
         if action == rename_action:
@@ -539,6 +543,15 @@ class DraggableLabel(QGraphicsItemGroup):
             self.name = action.text()
             self.update_label_text()
             self.analyzer.update_particle_data(self, {'name': self.name})
+        elif action == notes_action:
+            self.edit_notes()
+
+    def edit_notes(self):
+        dialog = self.analyzer.create_styled_input_dialog("Edit Notes", "Enter notes for this particle:", self.notes)
+        if dialog.exec_() == QInputDialog.Accepted:
+            self.notes = dialog.textValue()
+            self.analyzer.update_particle_data(self, {'notes': self.notes})
+            self.analyzer.show_toast(f"Notes updated for {self.name}", message_type="info")
 
     def rename(self):
         dialog = self.analyzer.create_styled_input_dialog("Rename Particle", "Enter new name:", self.name or "")
@@ -555,6 +568,10 @@ class DraggableLabel(QGraphicsItemGroup):
             return f"{self.name}: {self.height:.2f} µm"
         else:
             return f"{self.height:.2f} µm"
+
+    def update_height(self, new_height):
+        self.height = new_height
+        self.update_label_text()
 
     def update_label_text(self):
         label_text = self.get_label_text()
@@ -585,10 +602,6 @@ class DraggableLabel(QGraphicsItemGroup):
         cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
         delete_cross.setPos(cross_x, cross_y)
 
-
-        # #ifitworksdonttouchit
-
-
     def itemChange(self, change, value):
         if change == QGraphicsItemGroup.ItemPositionHasChanged:
             self.signals.moved.emit(self)
@@ -617,11 +630,10 @@ class CapillaryAnalyzer(QMainWindow):
         main_layout = QHBoxLayout()
         main_widget.setLayout(main_layout)
 
-
-
+        self.current_label_size = 100  # Default label size (100%)
 
         app_name = "PHASe"
-        app_author = "VX Software"
+        app_author = "Alfa Ozaltin @ VX Software"
         self.config_dir = self.get_app_data_dir(app_name, app_author)
         os.makedirs(self.config_dir, exist_ok=True)
         self.config_path = os.path.join(self.config_dir, 'phase_config.json')
@@ -679,8 +691,6 @@ class CapillaryAnalyzer(QMainWindow):
         control_layout = QVBoxLayout(control_panel)
         self.angle_control = None
 
-
-
         # Logo space
         logo_label = QLabel()
         logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
@@ -695,7 +705,6 @@ class CapillaryAnalyzer(QMainWindow):
 
         # Ceiling and Floor buttons
         ceiling_floor_layout = QHBoxLayout()
-
 
         ceiling_floor_left = QVBoxLayout()
         self.set_ceiling_button = ModernButton("assets/set_ceiling_btn.svg", "Set Ceiling")
@@ -714,7 +723,6 @@ class CapillaryAnalyzer(QMainWindow):
         height_wall_layout = QGridLayout()
 
         self.create_menu_bar()
-
 
         # Height Input
         height_label = QLabel("Capillary Height:")
@@ -895,7 +903,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.toast_label = None
         self.height_input_valid = False
 
-        QTimer.singleShot(1000, self.check_for_updates)
+        QTimer.singleShot(1000, self.check_for_updates) if BETA_FEATURES_ENABLED else None
 
     def process_height_input(self):
         input_text = self.height_input.text().strip().lower()
@@ -937,6 +945,8 @@ class CapillaryAnalyzer(QMainWindow):
         except ValueError:
             self.show_warning_message("Invalid Input",
                                       "Please enter a valid number followed by a unit (um, mm, or pm).")
+
+        self.update_particle_heights()
 
     def get_app_data_dir(self, app_name, app_author):
         if sys.platform == 'win32':
@@ -989,19 +999,20 @@ class CapillaryAnalyzer(QMainWindow):
         # File menu
         file_menu = menu_bar.addMenu('File')
 
-        save_workspace_action = QAction('Save Workspace', self)
-        save_workspace_action.triggered.connect(self.save_workspace)
-        file_menu.addAction(save_workspace_action)
+        if BETA_FEATURES_ENABLED:
+            save_workspace_action = QAction('Save Workspace', self)
+            save_workspace_action.triggered.connect(self.save_workspace)
+            file_menu.addAction(save_workspace_action)
 
-        load_workspace_action = QAction('Load Workspace', self)
-        load_workspace_action.triggered.connect(self.load_workspace)
-        file_menu.addAction(load_workspace_action)
+            load_workspace_action = QAction('Load Workspace', self)
+            load_workspace_action.triggered.connect(self.load_workspace)
+            file_menu.addAction(load_workspace_action)
 
-        file_menu.addSeparator()
+            file_menu.addSeparator()
 
-        check_updates_action = QAction('Check for Updates', self)
-        check_updates_action.triggered.connect(self.check_for_updates)
-        file_menu.addAction(check_updates_action)
+            check_updates_action = QAction('Check for Updates', self)
+            check_updates_action.triggered.connect(self.check_for_updates)
+            file_menu.addAction(check_updates_action)
 
         exit_action = QAction('Exit', self)
         exit_action.triggered.connect(self.close)
@@ -1018,11 +1029,18 @@ class CapillaryAnalyzer(QMainWindow):
         interactive_guide_action = QAction('Interactive Guide', self)
         interactive_guide_action.triggered.connect(self.start_guided_tour)
         help_menu.addAction(interactive_guide_action)
+
+        help_menu.addSeparator()
+
+        # Add Height Reference action
+        height_reference_action = QAction('Height Reference', self)
+        height_reference_action.triggered.connect(self.show_height_reference)
+        help_menu.addAction(height_reference_action)
+
         help_menu.addSeparator()
         about_action = QAction('About', self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
-
 
         # Style the menu bar
         menu_style = """
@@ -1056,6 +1074,130 @@ class CapillaryAnalyzer(QMainWindow):
         menu_bar.setStyleSheet(menu_style)
 
         self.setStyleSheet(self.styleSheet() + menu_style)
+
+    def show_height_reference(self):
+        try:
+            url = "https://raw.githubusercontent.com/simitbey/PHASe/refs/heads/master/height_reference.json"
+            response = requests.get(url)
+            response.raise_for_status()
+            reference_data = json.loads(response.text)
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Height Reference")
+            dialog.setFixedSize(350, 300)
+            dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+            layout = QVBoxLayout(dialog)
+
+            # Device type selection
+            device_label = QLabel("Device Type:")
+            layout.addWidget(device_label)
+            device_type_combo = QComboBox()
+            device_type_combo.addItems(reference_data.keys())
+            layout.addWidget(device_type_combo)
+
+            # Version selection
+            version_label = QLabel("Version:")
+            layout.addWidget(version_label)
+            version_combo = QComboBox()
+            layout.addWidget(version_combo)
+
+            # Reference information display
+            info_group = QGroupBox("Reference Information")
+            info_layout = QGridLayout()
+            wall_thickness_label = QLabel("Wall Thickness:")
+            wall_thickness_value = QLabel()
+            magnet_distance_label = QLabel("Magnet Distance:")
+            magnet_distance_value = QLabel()
+            inner_width_label = QLabel("Inner Width:")
+            inner_width_value = QLabel()
+
+            info_layout.addWidget(wall_thickness_label, 0, 0)
+            info_layout.addWidget(wall_thickness_value, 0, 1)
+            info_layout.addWidget(magnet_distance_label, 1, 0)
+            info_layout.addWidget(magnet_distance_value, 1, 1)
+            info_layout.addWidget(inner_width_label, 2, 0)
+            info_layout.addWidget(inner_width_value, 2, 1)
+
+            info_group.setLayout(info_layout)
+            layout.addWidget(info_group)
+
+            def update_versions():
+                device = device_type_combo.currentText()
+                version_combo.clear()
+                version_combo.addItems(reference_data[device].keys())
+                update_info()
+
+            def update_info():
+                device = device_type_combo.currentText()
+                version = version_combo.currentText()
+                if device in reference_data and version in reference_data[device]:
+                    data = reference_data[device][version]
+                    wall_thickness_value.setText(f"{data.get('wall_thickness', 'N/A')} µm")
+                    magnet_distance_value.setText(f"{data.get('magnet_distance', 'N/A')} mm")
+                    inner_width_value.setText(f"{data.get('inner_width', 'N/A')} µm")
+                else:
+                    wall_thickness_value.setText("N/A")
+                    magnet_distance_value.setText("N/A")
+                    inner_width_value.setText("N/A")
+
+            device_type_combo.currentTextChanged.connect(update_versions)
+            version_combo.currentTextChanged.connect(update_info)
+
+            update_versions()
+
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2c3e50;
+                    color: white;
+                }
+                QGroupBox {
+                    border: 2px solid #3498db;
+                    border-radius: 5px;
+                    margin-top: 10px;
+                    font-weight: bold;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 3px 0 3px;
+                }
+                QComboBox {
+                    background-color: #34495e;
+                    color: white;
+                    border: 1px solid #3498db;
+                    border-radius: 3px;
+                    padding: 5px;
+                    min-width: 6em;
+                }
+                QComboBox::drop-down {
+                    subcontrol-origin: padding;
+                    subcontrol-position: top right;
+                    width: 15px;
+                    border-left-width: 1px;
+                    border-left-color: #3498db;
+                    border-left-style: solid;
+                    border-top-right-radius: 3px;
+                    border-bottom-right-radius: 3px;
+                }
+                QLabel {
+                    color: white;
+                    font-size: 12px;
+                }
+                QLabel[objectName^="value"] {
+                    font-weight: bold;
+                    color: #3498db;
+                }
+            """)
+
+            # Set object names for styling
+            wall_thickness_value.setObjectName("value_wall_thickness")
+            magnet_distance_value.setObjectName("value_magnet_distance")
+            inner_width_value.setObjectName("value_inner_width")
+
+            dialog.show()
+
+        except Exception as e:
+            self.show_error_message("Error", f"Failed to load height reference data: {str(e)}")
 
     def show_about_dialog(self):
         about_text = f"""
@@ -1123,8 +1265,11 @@ class CapillaryAnalyzer(QMainWindow):
             ("Export Data", "When you're done, click this button to save your data as a CSV file.", self.export_button),
             ("Reset and Clear", "Use these buttons to reset the angle or clear all particle selections.",
              self.reset_angle_button),
-            ("Save Workspace","Save your workspace for sharing it with other users or picking up from where you leave off!", "File/Save Workspace"),
-            ("Load Workspace","Load saved .phw files to replace the current workspace with the saved one.", "File/Load Workspace"),
+            ("Save Workspace",
+             "Save your workspace for sharing it with other users or picking up from where you leave off!",
+             "File/Save Workspace") if BETA_FEATURES_ENABLED else None,
+            ("Load Workspace", "Load saved .phw files to replace the current workspace with the saved one.",
+             "File/Load Workspace") if BETA_FEATURES_ENABLED else None,
             ("That's it!", "You're all set! Remember, you can always access this guide again.", None),
             ("Interactive Guide",
              "You can find the Interactive Guide here in the Help menu whenever you need a refresher.",
@@ -1178,26 +1323,34 @@ class CapillaryAnalyzer(QMainWindow):
             self.show_info_message("Workspace Cleared",
                                    "The workspace has been reset to its initial state.",
                                    buttons=["OK"],
-                                   timeout=3000)  # Set to 2 seconds
+                                   timeout=3000)
 
     def next_tour_step(self):
-        if self.current_tour_step < len(self.tour_steps):
-            title, message, target = self.tour_steps[self.current_tour_step]
+        while self.current_tour_step < len(self.tour_steps):
+            step = self.tour_steps[self.current_tour_step]
+
+            if step is None:
+                self.current_tour_step += 1
+                continue
+
+            title, message, target = step
+
             if isinstance(target, str) and '/' in target:
                 menu_name, item_name = target.split('/')
-                self.show_menu_item(menu_name, item_name)
-                self.tour_guide.show_message(f"<b>{title}</b><br><br>{message}", self.menuBar())
+                self.show_menu_item(menu_name, item_name, title, message)
             else:
                 self.tour_guide.show_message(f"<b>{title}</b><br><br>{message}", target)
                 if target:
                     self.highlight_widget(target)
-            self.current_tour_step += 1
-        else:
-            self.tour_guide.hide()
-            self.config['tour_completed'] = True
-            self.save_config()
 
-    def show_menu_item(self, menu_name, item_name):
+            self.current_tour_step += 1
+            return
+
+        self.tour_guide.hide()
+        self.config['tour_completed'] = True
+        self.save_config()
+
+    def show_menu_item(self, menu_name, item_name, title, message):
         menu = next((action.menu() for action in self.menuBar().actions() if action.text() == menu_name), None)
         if menu:
             # Find the menu action
@@ -1205,24 +1358,18 @@ class CapillaryAnalyzer(QMainWindow):
             menu_rect = self.menuBar().actionGeometry(menu_action)
             global_pos = self.menuBar().mapToGlobal(menu_rect.topLeft())
 
-            # Calculate position for the tour guide
-            # Adjust these values to fine-tune the position
-            x_offset = 20  # Positive value moves it to the right
-            y_offset = menu_rect.height() + 5  # Position it just below the menu bar
+            x_offset = 20  # Positive to right
+            y_offset = menu_rect.height() + 5
             guide_pos = global_pos + QPoint(x_offset, y_offset)
 
-            # Show the tour guide message
-            title, message, _ = self.tour_steps[self.current_tour_step]
             self.tour_guide.show_message(f"<b>{title}</b><br><br>{message}", None,
                                          custom_pos=self.mapFromGlobal(guide_pos))
 
-            # Open the menu after a short delay
             QTimer.singleShot(500, lambda: self.open_and_highlight_menu(menu, item_name))
 
-        # Prevent the tour from advancing automatically
+        # Prevent the tour from continuing automatically
         self.tour_guide.next_button.clicked.disconnect()
         self.tour_guide.next_button.clicked.connect(self.on_menu_item_shown)
-
 
     def open_and_highlight_menu(self, menu, item_name):
         # Open the menu
@@ -1282,6 +1429,7 @@ class CapillaryAnalyzer(QMainWindow):
         return slider
 
     def update_label_size(self, value):
+        self.current_label_size = value
         scale = value / 100.0
         for particle in self.particles:
             if 'label_item' in particle:
@@ -1321,7 +1469,6 @@ class CapillaryAnalyzer(QMainWindow):
             except Exception as e:
                 self.show_error_message("Save Error", f"Error saving workspace: {str(e)}")
                 print(f"Full error: {traceback.format_exc()}")  # This will print the full error traceback
-
 
     def load_workspace(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Load Workspace", "", "PHASe Workspace Files (*.phw)")
@@ -1376,7 +1523,6 @@ class CapillaryAnalyzer(QMainWindow):
                 self.show_error_message("Load Error", f"Error loading workspace: {str(e)}")
 
                 print(f"Full error: {traceback.format_exc()}")  # This will print the full error traceback
-
 
     def update_ui_from_workspace(self):
         # Update height input
@@ -1465,7 +1611,6 @@ class CapillaryAnalyzer(QMainWindow):
 
         return QCursor(base_pixmap, 16, 16)  # Hotspot at the center of the cross
 
-
     def hide_toast(self):
         if hasattr(self, 'toast_label'):
             self.toast_label.hide()
@@ -1552,7 +1697,6 @@ class CapillaryAnalyzer(QMainWindow):
             except ValueError:
                 self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
 
-
     def reset_angle(self):
         self.angle_value = 0
         self.coarse_wheel.setValue(0)
@@ -1583,6 +1727,7 @@ class CapillaryAnalyzer(QMainWindow):
             else:
                 self.show_toast("Invalid Thickness. Please enter a non-negative number.", message_type="error")
         self.update_lines()
+        self.update_particle_heights()
 
     def update_capillary_height(self):
         height_input = self.height_input.text().strip().lower()
@@ -1615,6 +1760,7 @@ class CapillaryAnalyzer(QMainWindow):
         except ValueError:
             # self.show_warning_message("Invalid Input", "Please enter a valid number followed by a unit (um, mm, or pm).")
             pass
+        self.update_particle_heights()
 
     def update_angle(self, value, is_fine):
         if not self.check_image_loaded():
@@ -1640,6 +1786,7 @@ class CapillaryAnalyzer(QMainWindow):
 
         self.angle_input.setText(f"{self.angle_value:.2f}")
         self.update_lines()
+        self.update_particle_heights()
 
     def set_angle_from_input(self):
         if not self.check_image_loaded():
@@ -1652,7 +1799,8 @@ class CapillaryAnalyzer(QMainWindow):
                 self.fine_wheel.setValue(0)  # Reset fine wheel to center
                 self.update_lines()
             else:
-                self.show_toast("Invalid Angle: Please enter an angle between -90 and 90 degrees.", message_type="warning")
+                self.show_toast("Invalid Angle: Please enter an angle between -90 and 90 degrees.",
+                                message_type="warning")
         except ValueError:
             self.show_toast("Invalid Input: Please enter a valid number for the angle.", message_type="error")
 
@@ -1694,7 +1842,6 @@ class CapillaryAnalyzer(QMainWindow):
             print(error_message)
             QMessageBox.critical(self, "Error", error_message)
 
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.image_item:
@@ -1717,7 +1864,6 @@ class CapillaryAnalyzer(QMainWindow):
         self.graphics_view.viewport().update()
         QApplication.processEvents()
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
-
 
     def point_to_menu_item(self, menu_name, item_name):
         menu = next((action.menu() for action in self.menuBar().actions() if action.text() == menu_name), None)
@@ -1843,7 +1989,6 @@ class CapillaryAnalyzer(QMainWindow):
                         end_y = start_y + width * slope
                         self.ceiling_ghost_line = self.scene.addLine(0, start_y, width, end_y, ghost_pen)
 
-
     def set_height(self):
         if not self.check_image_loaded():
             return
@@ -1878,6 +2023,8 @@ class CapillaryAnalyzer(QMainWindow):
                 self.update_lines()  # Update lines after setting the height
             except ValueError:
                 self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
+
+        self.update_particle_heights()
 
     def create_styled_input_dialog(self, title, label, text=""):
         dialog = QInputDialog(self)
@@ -1957,7 +2104,6 @@ class CapillaryAnalyzer(QMainWindow):
             return (pixels_from_bottom / adjusted_total_pixels) * self.capillary_height
         return 0
 
-
     def update_particles(self):
         if self.capillary_height is not None:
             updated_particles = []
@@ -1995,6 +2141,7 @@ class CapillaryAnalyzer(QMainWindow):
                 self.scene.addItem(particle_dot)
 
                 label = DraggableLabel(x, y, particle['name'], particle['height'], self)
+                label.setScale(self.current_label_size / 100.0)
 
                 # Restore the previous position if it exists, otherwise use the default
                 if 'label_item' in particle and particle['label_item'] in existing_positions:
@@ -2019,7 +2166,6 @@ class CapillaryAnalyzer(QMainWindow):
 
             self.update_connection_lines()
             self.scene.update()
-
 
     def show_warning_message(self, title, message):
         self.show_toast(f"{title}: {message}", message_type="warning")
@@ -2069,6 +2215,15 @@ class CapillaryAnalyzer(QMainWindow):
         # Redraw particles to update visual representation
         self.draw_particles()
 
+    def update_particle_heights(self):
+        if self.capillary_height is not None and self.ceiling_y is not None and self.floor_y is not None:
+            for particle in self.particles:
+                new_height = self.calculate_height(particle['x'], particle['y'])
+                particle['height'] = new_height
+                if 'label_item' in particle:
+                    particle['label_item'].update_height(new_height)
+            self.update_connection_lines()
+            self.scene.update()
 
     def delete_particle(self, label):
         for i, particle in enumerate(self.particles):
@@ -2090,8 +2245,6 @@ class CapillaryAnalyzer(QMainWindow):
                 end = label.sceneBoundingRect().center()
                 line.setLine(QLineF(start, end))
 
-
-
     def add_used_name(self, name):
         self.used_names.add(name)
 
@@ -2108,13 +2261,12 @@ class CapillaryAnalyzer(QMainWindow):
             try:
                 with open(file_name, 'w', newline='') as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow(['Name', 'X', 'Y', 'Height (µm)'])
+                    writer.writerow(['Name', 'Height (µm)', 'Notes'])
                     for particle in self.particles:
                         writer.writerow([
                             particle['name'],
-                            particle['x'],
-                            particle['y'],
-                            f"{particle['height']:.2f}"
+                            f"{particle['height']:.2f}",
+                            particle.get('notes', '') if BETA_FEATURES_ENABLED else ''
                         ])
                 self.show_info_message("Export Successful", f"Data exported to {file_name}", buttons=['OK'])
             except Exception as e:
@@ -2138,7 +2290,8 @@ class CapillaryAnalyzer(QMainWindow):
                 elif platform.system() == 'Windows':
                     asset_suffix = '_win64.zip'
                 else:
-                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained", message_type="warning")
+                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained",
+                                    message_type="warning")
                     return
 
                 suitable_asset = any(asset['name'].endswith(asset_suffix) for asset in latest_release['assets'])
@@ -2155,7 +2308,8 @@ class CapillaryAnalyzer(QMainWindow):
                 elif platform.system() == 'Windows':
                     asset_suffix = '_win64.zip'
                 else:
-                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained", message_type="warning")
+                    self.show_toast(f"The current platform, {platform.system()}, is not natively maintained",
+                                    message_type="warning")
                     return
 
                 suitable_asset = any(asset['name'].endswith(asset_suffix) for asset in latest_release['assets'])
@@ -2164,7 +2318,7 @@ class CapillaryAnalyzer(QMainWindow):
                     return
 
                 message = f"A new version ({latest_version}) is available. You are currently using version {CURRENT_VERSION}. Do you want to download and install the update?"
-                self.show_info_message("Beta Update Modal", message, duttons=['Yes', 'No'],
+                self.show_info_message("Beta Update Modal", message, buttons=['Yes', 'No'],
                                        callback=lambda response: self.handle_update_response(response, latest_release))
 
             else:
