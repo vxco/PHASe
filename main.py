@@ -53,7 +53,7 @@ def exception_handler(logger, exc_type, exc_value, exc_traceback):
 app_logger = Logger('PHASe').get_logger()
 sys.excepthook = lambda *args: exception_handler(app_logger, *args)
 
-app_logger.info("Starting PHASe")
+app_logger.info("Starting PHASe app")
 
 try:
     import csv
