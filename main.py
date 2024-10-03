@@ -2399,9 +2399,9 @@ if __name__ == "__main__":
         if platform.system() == 'Darwin':
             app.setAttribute(Qt.AA_DontUseNativeMenuBar, False)
 
-        app_logger.info("Creating main window...")
+        app_logger.info("Creating mainframe...")
         window = CapillaryAnalyzer()
-        app_logger.info("Showing main window...")
+        app_logger.info("Showing mainframe...")
         window.show()
         app_logger.info("Entering main event loop...")
         sys.exit(app.exec_())
