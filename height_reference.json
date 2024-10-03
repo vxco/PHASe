@@ -1,0 +1,26 @@
+{
+  "Ariphanil": {
+    "9.3.3": {
+      "wall_thickness": 400,
+      "magnet_distance": 3,
+      "inner_width": 2400
+    },
+    "9.3.4": {
+      "wall_thickness": 525,
+      "magnet_distance": 3.25,
+      "inner_width": 2400
+    },
+    "9.3.5": {
+      "wall_thickness": 650,
+      "magnet_distance": 3.5,
+      "inner_width": 2400
+    }
+  },
+  "Sena's Sorting Device": {
+    "1.0": {
+      "wall_thickness": 0,
+      "magnet_distance": 0,
+      "inner_width": 0
+    }
+  }
+}
