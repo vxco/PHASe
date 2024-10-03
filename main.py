@@ -3,7 +3,7 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 
-CURRENT_VERSION = "3.0.8"
+CURRENT_VERSION = "3.1.1"
 CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
 BETA_FEATURES_ENABLED = False
