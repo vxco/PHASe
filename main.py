@@ -3,7 +3,7 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 
-CURRENT_VERSION = "3.0.7"
+CURRENT_VERSION = "3.0.8"
 CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
 BETA_FEATURES_ENABLED = False
@@ -1077,7 +1077,7 @@ class CapillaryAnalyzer(QMainWindow):
 
     def show_height_reference(self):
         try:
-            url = "https://raw.githubusercontent.com/simitbey/PHASe/refs/heads/master/height_reference.json"
+            url = "https://raw.githubusercontent.com/vxco/PHASe/refs/heads/master/height_reference.json"
             response = requests.get(url)
             response.raise_for_status()
             reference_data = json.loads(response.text)
@@ -2276,7 +2276,7 @@ class CapillaryAnalyzer(QMainWindow):
 
     def check_for_updates(self):
         try:
-            owner = "simitbey"
+            owner = "vxco"
             repo = "PHASe"
             url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
 
