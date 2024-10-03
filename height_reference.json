@@ -19,7 +19,7 @@
   "Sena's Sorting Device": {
     "1.0": {
       "wall_thickness": 0,
-      "magnet_distance": 0,
+      "magnet_distance": 1.8,
       "inner_width": 0
     }
   }

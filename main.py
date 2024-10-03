@@ -1265,6 +1265,8 @@ class CapillaryAnalyzer(QMainWindow):
             ("Export Data", "When you're done, click this button to save your data as a CSV file.", self.export_button),
             ("Reset and Clear", "Use these buttons to reset the angle or clear all particle selections.",
              self.reset_angle_button),
+            ("Height Reference", "You can find the Height Reference in the Help menu for common device dimensions.",
+             "Help/Height Reference"),
             ("Save Workspace",
              "Save your workspace for sharing it with other users or picking up from where you leave off!",
              "File/Save Workspace") if BETA_FEATURES_ENABLED else None,
