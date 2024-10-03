@@ -69,7 +69,7 @@ try:
 
     from PyQt5.QtCore import (Qt, QPoint, QPointF, QRectF, QLineF, pyqtSignal,
                               QObject, QSize, QTimer, QBuffer, QPropertyAnimation,
-                              QEasingCurve, QByteArray, QEventLoop)
+                              QEasingCurve, QByteArray, QEventLoop, QParallelAnimationGroup)
 
     from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor)
 
@@ -1201,40 +1201,122 @@ class CapillaryAnalyzer(QMainWindow):
 
     def show_about_dialog(self):
         about_text = f"""
-        <h2 style='color: white;'>PHASe - Particle Height Analysis Software</h2>
-        <p style='color: white;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
-        <p style='color: white;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
-        <p style='color: white;'>Developed by: Alfa Ozaltin @ VX Software</p>
-        <p style='color: white;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
+        <h2 style='color: white; text-align: center;'>PHASe</h2>
+        <h3 style='color: #3498db; text-align: center;'>Particle Height Analysis Software</h3>
+        <p style='color: white; text-align: center;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
+        <p style='color: white; text-align: center;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
+        <p style='color: white; text-align: center;'>Developed by: Alfa Ozaltin @ VX Software</p>
+        <p style='color: #bdc3c7; text-align: center;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
         """
 
-        about_box = QMessageBox(self)
+        about_box = QDialog(self)
         about_box.setWindowTitle("About PHASe")
-        about_box.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
-        about_box.setText(about_text)
-        about_box.setStandardButtons(QMessageBox.Ok)
+        about_box.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        about_box.setAttribute(Qt.WA_TranslucentBackground)
+        about_box.setFixedSize(450, 500)
 
-        about_box.setStyleSheet("""
-            QMessageBox {
-                background-color: #2c3e50;
-            }
-            QMessageBox QLabel {
+        layout = QVBoxLayout(about_box)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Create a custom widget for the background
+        class BackgroundWidget(QWidget):
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setBrush(QColor(44, 62, 80, 240))
+                painter.setPen(Qt.NoPen)
+                painter.drawRoundedRect(self.rect(), 20, 20)
+
+        bg_widget = BackgroundWidget()
+        layout.addWidget(bg_widget)
+        bg_layout = QVBoxLayout(bg_widget)
+
+        # PHASe Logo with glow effect
+        phase_logo = QLabel()
+        phase_logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
+        phase_logo.setPixmap(phase_logo_pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        phase_logo.setAlignment(Qt.AlignCenter)
+
+        # Create a container for the logo and glow effect
+        logo_container = QWidget()
+        logo_layout = QVBoxLayout(logo_container)
+        logo_layout.addWidget(phase_logo)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+
+        glow = QGraphicsDropShadowEffect()
+        glow.setColor(QColor(52, 152, 219))
+        glow.setBlurRadius(20)
+        glow.setOffset(0)
+        logo_container.setGraphicsEffect(glow)
+
+        bg_layout.addWidget(logo_container)
+
+        # About Text
+        about_label = QLabel(about_text)
+        about_label.setWordWrap(True)
+        about_label.setAlignment(Qt.AlignCenter)
+        about_label.setStyleSheet("background-color: transparent;")
+        bg_layout.addWidget(about_label)
+
+        # Separator line
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background-color: #3498db;")
+        bg_layout.addWidget(line)
+
+        # "Brought to you by" text and VX Logo in one line
+        bottom_widget = QWidget()
+        bottom_layout = QHBoxLayout(bottom_widget)
+        bottom_widget.setStyleSheet("background-color: transparent;")
+
+        brought_by_label = QLabel("Brought to you by")
+        brought_by_label.setStyleSheet("color: white; font-size: 14px; background-color: transparent;")
+        bottom_layout.addWidget(brought_by_label)
+
+        vx_logo = QLabel()
+        vx_logo_pixmap = QPixmap(absolute_path("assets/vx_logo.svg"))
+        vx_logo.setPixmap(vx_logo_pixmap.scaled(70, 25, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        vx_logo.setAlignment(Qt.AlignVCenter)
+        vx_logo.setStyleSheet("background-color: transparent;")
+        bottom_layout.addWidget(vx_logo)
+
+        bottom_layout.setAlignment(Qt.AlignCenter)
+        bg_layout.addWidget(bottom_widget)
+
+        # Close button
+        close_button = QPushButton("×")
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
                 color: white;
-            }
-            QMessageBox QPushButton {
-                background-color: #34495e;
-                color: white;
+                font-size: 20px;
                 border: none;
-                border-radius: 5px;
-                padding: 5px 15px;
-                margin: 5px;
             }
-            QMessageBox QPushButton:hover {
-                background-color: #3498db;
+            QPushButton:hover {
+                color: #e74c3c;
             }
         """)
-        icon = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
-        about_box.setIconPixmap(icon.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        close_button.clicked.connect(about_box.close)
+        layout.addWidget(close_button, alignment=Qt.AlignTop | Qt.AlignRight)
+
+        # Add fade-in and slide-up animation
+        fade_in = QGraphicsOpacityEffect(bg_widget)
+        bg_widget.setGraphicsEffect(fade_in)
+        fade_in_anim = QPropertyAnimation(fade_in, b"opacity")
+        fade_in_anim.setDuration(650)
+        fade_in_anim.setStartValue(0)
+        fade_in_anim.setEndValue(1)
+
+        slide_up = QPropertyAnimation(bg_widget, b"pos")
+        slide_up.setDuration(500)
+        slide_up.setStartValue(QPoint(0, 50))
+        slide_up.setEndValue(QPoint(0, 0))
+        slide_up.setEasingCurve(QEasingCurve.OutCubic)
+
+        anim_group = QParallelAnimationGroup()
+        anim_group.addAnimation(fade_in_anim)
+        anim_group.addAnimation(slide_up)
+        anim_group.start()
 
         about_box.exec_()
 
