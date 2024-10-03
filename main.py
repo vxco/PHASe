@@ -3,6 +3,8 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 
+from PyQt5.QtSvg import QSvgRenderer
+
 CURRENT_VERSION = "3.1.1"
 CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
@@ -57,6 +59,7 @@ app_logger.info("Starting PHASe app")
 
 try:
     import csv
+    import random
     import json
     import math
     import traceback
@@ -69,9 +72,10 @@ try:
 
     from PyQt5.QtCore import (Qt, QPoint, QPointF, QRectF, QLineF, pyqtSignal,
                               QObject, QSize, QTimer, QBuffer, QPropertyAnimation,
-                              QEasingCurve, QByteArray, QEventLoop, QParallelAnimationGroup)
+                              QEasingCurve, QByteArray, QEventLoop, QParallelAnimationGroup, QEvent, QRect)
 
-    from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor)
+    from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor, QFontDatabase,
+                             QLinearGradient, QRadialGradient, QRegion, QTransform)
 
     from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QInputDialog,
                                  QVBoxLayout, QHBoxLayout, QWidget, QGraphicsScene, QGraphicsView,
@@ -114,6 +118,171 @@ def absolute_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
+
+
+
+class AboutDialog(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self.content = QWidget(self)
+        self.content.setStyleSheet("background-color: rgba(20, 20, 30, 240); border-radius: 20px;")
+        self.content.setFixedSize(500, 600)
+
+        layout = QVBoxLayout(self.content)
+        layout.setContentsMargins(40, 40, 40, 40)
+
+        # Load custom font
+        QFontDatabase.addApplicationFont(absolute_path("assets/Roboto-Light.ttf"))
+
+        # Logo
+        logo_label = QLabel()
+        logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
+        logo_label.setPixmap(logo_pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(logo_label)
+
+        # About text
+        about_text = f"""
+        <h2 style='color: #e0e0e0; text-align: center; font-family: "Roboto Light", sans-serif;'>PHASe</h2>
+        <h3 style='color: #3498db; text-align: center; font-family: "Roboto Light", sans-serif;'>Particle Height Analysis Software</h3>
+        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
+        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
+        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>Developed by: Alfa Ozaltin @ VX Software</p>
+        <p style='color: #808080; text-align: center; font-family: "Roboto Light", sans-serif;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
+        """
+        self.about_label = QLabel(about_text)
+        self.about_label.setWordWrap(True)
+        self.about_label.setStyleSheet("font-size: 16px;")
+        layout.addWidget(self.about_label)
+
+        # VX Logo
+        vx_logo = QLabel()
+        vx_logo_pixmap = QPixmap(absolute_path("assets/vx_logo.svg"))
+        vx_logo.setPixmap(vx_logo_pixmap.scaled(140, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        vx_logo.setAlignment(Qt.AlignCenter)
+        layout.addWidget(vx_logo)
+
+        layout.addStretch(1)
+
+        self.content_layout = QVBoxLayout(self)
+        self.content_layout.addWidget(self.content, alignment=Qt.AlignCenter)
+
+        # Add subtle glow effect
+        glow = QGraphicsDropShadowEffect()
+        glow.setColor(QColor(52, 152, 219, 75))
+        glow.setBlurRadius(40)
+        glow.setOffset(0)
+        self.content.setGraphicsEffect(glow)
+
+        self.animation = QParallelAnimationGroup()
+        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+        self.fade_in_animation.setDuration(600)
+        self.animation.addAnimation(self.fade_in_animation)
+
+        self.content_animation = QPropertyAnimation(self.content, b"geometry")
+        self.content_animation.setDuration(600)
+        self.content_animation.setEasingCurve(QEasingCurve.OutQuint)
+        self.animation.addAnimation(self.content_animation)
+
+        self.frog_timer = QTimer(self)
+        self.frog_timer.timeout.connect(self.levitate_frog)
+        self.frog_timer.start(12000)
+
+        # Load SVG frog
+        self.frog_svg = QSvgRenderer(absolute_path("assets/tf.svg"))
+        self.frog_pixmap = QPixmap(30, 30)
+        self.frog_pixmap.fill(Qt.transparent)
+        painter = QPainter(self.frog_pixmap)
+        self.frog_svg.render(painter)
+        painter.end()
+
+        self.frog_label = QLabel(self)
+        self.frog_label.setFixedSize(30, 30)
+        self.frog_label.hide()
+
+        # Frog rotation animation
+        self.rotation_anim = QPropertyAnimation(self, b"frogRotation")
+        self.rotation_anim.setDuration(2000)  # 2 seconds for a full rotation
+        self.rotation_anim.setStartValue(0)
+        self.rotation_anim.setEndValue(360)
+        self.rotation_anim.setLoopCount(-1)  # Infinite loop
+        self.rotation_anim.valueChanged.connect(self.rotateFrog)
+
+    def levitate_frog(self):
+        if random.random() < 1.0:
+            start_x = -30
+            end_x = self.width() + 30
+            y = random.randint(50, self.height() - 50)
+
+            self.frog_label.move(start_x, y)
+            self.frog_label.show()
+
+            self.frog_anim = QPropertyAnimation(self.frog_label, b"pos")
+            self.frog_anim.setDuration(5000)
+            self.frog_anim.setStartValue(QPoint(start_x, y))
+            self.frog_anim.setEndValue(QPoint(end_x, y))
+            self.frog_anim.setEasingCurve(QEasingCurve.InOutSine)
+            self.frog_anim.finished.connect(self.frog_label.hide)
+            self.frog_anim.finished.connect(self.rotation_anim.stop)
+            self.frog_anim.start()
+
+            self.rotation_anim.start()
+
+    def rotateFrog(self, angle):
+        # Create a rotated and scaled version of the frog
+        transform = QTransform()
+
+        # Rotate
+        transform.rotate(angle)
+
+        # Scale based on rotation to create 3D illusion
+        scale = 0.5 + abs(math.sin(math.radians(angle))) * 0.5
+        transform.scale(scale, 1.0)
+
+        rotated_pixmap = self.frog_pixmap.transformed(transform, Qt.SmoothTransformation)
+
+        # Ensure the rotated pixmap is centered
+        centered_pixmap = QPixmap(30, 30)
+        centered_pixmap.fill(Qt.transparent)
+        painter = QPainter(centered_pixmap)
+        painter.drawPixmap(QPointF((30 - rotated_pixmap.width()) / 2, (30 - rotated_pixmap.height()) / 2),
+                           rotated_pixmap)
+        painter.end()
+
+        self.frog_label.setPixmap(centered_pixmap)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        start_rect = QRect(self.content.geometry())
+        start_rect.moveCenter(self.rect().center() + QPoint(0, 50))
+        end_rect = QRect(self.content.geometry())
+        end_rect.moveCenter(self.rect().center())
+
+        self.content_animation.setStartValue(start_rect)
+        self.content_animation.setEndValue(end_rect)
+
+        self.animation.start()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw background gradient
+        gradient = QRadialGradient(self.rect().center(), max(self.width(), self.height()) / 2)
+        gradient.setColorAt(0, QColor(25, 25, 35))
+        gradient.setColorAt(1, QColor(15, 15, 25))
+        painter.fillRect(self.rect(), gradient)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if not self.content.geometry().contains(event.pos()):
+                self.close()
 
 
 class ToastNotification(QWidget):
@@ -1200,125 +1369,10 @@ class CapillaryAnalyzer(QMainWindow):
             self.show_error_message("Error", f"Failed to load height reference data: {str(e)}")
 
     def show_about_dialog(self):
-        about_text = f"""
-        <h2 style='color: white; text-align: center;'>PHASe</h2>
-        <h3 style='color: #3498db; text-align: center;'>Particle Height Analysis Software</h3>
-        <p style='color: white; text-align: center;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
-        <p style='color: white; text-align: center;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
-        <p style='color: white; text-align: center;'>Developed by: Alfa Ozaltin @ VX Software</p>
-        <p style='color: #bdc3c7; text-align: center;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
-        """
+        dialog = AboutDialog(self)
+        dialog.resize(self.size())
+        dialog.show()
 
-        about_box = QDialog(self)
-        about_box.setWindowTitle("About PHASe")
-        about_box.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
-        about_box.setAttribute(Qt.WA_TranslucentBackground)
-        about_box.setFixedSize(450, 500)
-
-        layout = QVBoxLayout(about_box)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        # Create a custom widget for the background
-        class BackgroundWidget(QWidget):
-            def paintEvent(self, event):
-                painter = QPainter(self)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.setBrush(QColor(44, 62, 80, 240))
-                painter.setPen(Qt.NoPen)
-                painter.drawRoundedRect(self.rect(), 20, 20)
-
-        bg_widget = BackgroundWidget()
-        layout.addWidget(bg_widget)
-        bg_layout = QVBoxLayout(bg_widget)
-
-        # PHASe Logo with glow effect
-        phase_logo = QLabel()
-        phase_logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
-        phase_logo.setPixmap(phase_logo_pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        phase_logo.setAlignment(Qt.AlignCenter)
-
-        # Create a container for the logo and glow effect
-        logo_container = QWidget()
-        logo_layout = QVBoxLayout(logo_container)
-        logo_layout.addWidget(phase_logo)
-        logo_layout.setContentsMargins(0, 0, 0, 0)
-
-        glow = QGraphicsDropShadowEffect()
-        glow.setColor(QColor(52, 152, 219))
-        glow.setBlurRadius(20)
-        glow.setOffset(0)
-        logo_container.setGraphicsEffect(glow)
-
-        bg_layout.addWidget(logo_container)
-
-        # About Text
-        about_label = QLabel(about_text)
-        about_label.setWordWrap(True)
-        about_label.setAlignment(Qt.AlignCenter)
-        about_label.setStyleSheet("background-color: transparent;")
-        bg_layout.addWidget(about_label)
-
-        # Separator line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background-color: #3498db;")
-        bg_layout.addWidget(line)
-
-        # "Brought to you by" text and VX Logo in one line
-        bottom_widget = QWidget()
-        bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_widget.setStyleSheet("background-color: transparent;")
-
-        brought_by_label = QLabel("Brought to you by")
-        brought_by_label.setStyleSheet("color: white; font-size: 14px; background-color: transparent;")
-        bottom_layout.addWidget(brought_by_label)
-
-        vx_logo = QLabel()
-        vx_logo_pixmap = QPixmap(absolute_path("assets/vx_logo.svg"))
-        vx_logo.setPixmap(vx_logo_pixmap.scaled(70, 25, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        vx_logo.setAlignment(Qt.AlignVCenter)
-        vx_logo.setStyleSheet("background-color: transparent;")
-        bottom_layout.addWidget(vx_logo)
-
-        bottom_layout.setAlignment(Qt.AlignCenter)
-        bg_layout.addWidget(bottom_widget)
-
-        # Close button
-        close_button = QPushButton("×")
-        close_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                font-size: 20px;
-                border: none;
-            }
-            QPushButton:hover {
-                color: #e74c3c;
-            }
-        """)
-        close_button.clicked.connect(about_box.close)
-        layout.addWidget(close_button, alignment=Qt.AlignTop | Qt.AlignRight)
-
-        # Add fade-in and slide-up animation
-        fade_in = QGraphicsOpacityEffect(bg_widget)
-        bg_widget.setGraphicsEffect(fade_in)
-        fade_in_anim = QPropertyAnimation(fade_in, b"opacity")
-        fade_in_anim.setDuration(650)
-        fade_in_anim.setStartValue(0)
-        fade_in_anim.setEndValue(1)
-
-        slide_up = QPropertyAnimation(bg_widget, b"pos")
-        slide_up.setDuration(500)
-        slide_up.setStartValue(QPoint(0, 50))
-        slide_up.setEndValue(QPoint(0, 0))
-        slide_up.setEasingCurve(QEasingCurve.OutCubic)
-
-        anim_group = QParallelAnimationGroup()
-        anim_group.addAnimation(fade_in_anim)
-        anim_group.addAnimation(slide_up)
-        anim_group.start()
-
-        about_box.exec_()
 
     def load_config(self):
         if os.path.exists(self.config_path):
