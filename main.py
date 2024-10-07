@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 
 from PyQt5.QtSvg import QSvgRenderer
 
-CURRENT_VERSION = "3.1.1"
+CURRENT_VERSION = "3.5.0"
 CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
 BETA_FEATURES_ENABLED = False
@@ -88,6 +88,7 @@ try:
 
     app_logger.info("All modules imported successfully")
 
+
 except ImportError as e:
     app_logger.error(f"oopsie! Import error: {str(e)}")
     app_logger.error("contact support with the above error")
@@ -118,8 +119,6 @@ def absolute_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
-
-
 
 
 class AboutDialog(QWidget):
@@ -284,6 +283,134 @@ class AboutDialog(QWidget):
             if not self.content.geometry().contains(event.pos()):
                 self.close()
 
+
+
+class Minimap(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(150, 150)  # Increased size for better visibility
+        self.view_rect = QRectF()
+        self.full_rect = QRectF()
+        self.pixmap = None
+        self.hide()
+
+    def set_pixmap(self, pixmap):
+        self.pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.update()
+
+    def update_rects(self, view_rect, full_rect):
+        self.view_rect = view_rect
+        self.full_rect = full_rect
+        self.update()
+
+    def paintEvent(self, event):
+        if self.pixmap is None:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw background image
+        painter.drawPixmap(self.rect(), self.pixmap)
+
+        # Draw semi-transparent overlay
+        painter.fillRect(self.rect(), QColor(52, 73, 94, 100))
+
+        # Draw full image area outline
+        painter.setPen(QPen(Qt.white, 1))
+        painter.drawRect(self.rect().adjusted(1, 1, -1, -1))
+
+        # Draw view area
+        if not self.full_rect.isNull():
+            x_ratio = self.width() / self.full_rect.width()
+            y_ratio = self.height() / self.full_rect.height()
+            view_rect = QRectF(
+                (self.view_rect.x() - self.full_rect.x()) * x_ratio,
+                (self.view_rect.y() - self.full_rect.y()) * y_ratio,
+                self.view_rect.width() * x_ratio,
+                self.view_rect.height() * y_ratio
+            )
+            painter.fillRect(view_rect, QColor(52, 152, 219, 120))
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawRect(view_rect)
+
+
+class CustomGraphicsView(QGraphicsView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.setInteractive(True)
+        self.setMouseTracking(True)
+        self.pan_active = False
+        self.zoom_factor = 1.0
+        self.zoom_step = 0.002
+
+        self.minimap = Minimap(self)
+        self.minimap.move(10, 10)
+
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            factor = 1 + self.zoom_step
+        else:
+            factor = 1 - self.zoom_step
+
+        self.zoom_factor *= factor
+
+        # Limit zoom out to 10% of original size
+        if self.zoom_factor < 0.1:
+            factor = 0.1 / self.zoom_factor
+            self.zoom_factor = 0.1
+
+        # Limit zoom in to 1000% of original size
+        elif self.zoom_factor > 10:
+            factor = 10 / self.zoom_factor
+            self.zoom_factor = 10
+
+        self.scale(factor, factor)
+        self.update_minimap()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self.pan_active = True
+            self.pan_start = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.pan_active:
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - (event.x() - self.pan_start.x()))
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - (event.y() - self.pan_start.y()))
+            self.pan_start = event.pos()
+            self.update_minimap()
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self.pan_active = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def set_image(self, pixmap):
+        self.minimap.set_pixmap(pixmap)
+
+    def update_minimap(self):
+        if self.zoom_factor > 1.0:
+            self.minimap.show()
+            view_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+            self.minimap.update_rects(view_rect, self.sceneRect())
+        else:
+            self.minimap.hide()
 
 class ToastNotification(QWidget):
     def __init__(self, parent, title, message, buttons=None, timeout=5000):
@@ -524,7 +651,7 @@ class ScrollWheel(QWidget):
         self.value = 0
         self.min_value = -90
         self.max_value = 90
-        self.setFixedSize(40, 100)  # Even smaller fixed size
+        self.setFixedSize(40, 100)
         self.last_y = None
         self.sensitivity = 0.01 if is_fine else 0.1
         self.is_fine = is_fine
@@ -858,6 +985,9 @@ class CapillaryAnalyzer(QMainWindow):
                     }
                 """)
         control_layout = QVBoxLayout(control_panel)
+
+        control_panel.setFixedWidth(300)
+
         self.angle_control = None
 
         # Logo space
@@ -927,7 +1057,7 @@ class CapillaryAnalyzer(QMainWindow):
         height_wall_layout.addWidget(wall_thickness_label, 2, 0)
 
         self.wall_thickness_input = QLineEdit()
-        self.wall_thickness_input.setPlaceholderText("Enter thickness (µm)")
+        self.wall_thickness_input.setPlaceholderText("µm")
         self.wall_thickness_input.setStyleSheet("""
             QLineEdit {
                 background-color: #34495e;
@@ -1009,8 +1139,9 @@ class CapillaryAnalyzer(QMainWindow):
 
         control_layout.addStretch()
 
+        self.graphics_view = CustomGraphicsView()
+
         # Image area
-        self.graphics_view = QGraphicsView()
         self.graphics_view.setStyleSheet("""
             QGraphicsView {
                 background-color: #2c3e50;
@@ -1019,6 +1150,10 @@ class CapillaryAnalyzer(QMainWindow):
             }
         """)
         self.scene = CustomGraphicsScene(self)
+
+
+        self.graphics_view.setInteractive(True)
+        self.graphics_view.setMouseTracking(True)
 
         self.graphics_view.setScene(self.scene)
         self.graphics_view.setRenderHint(QPainter.Antialiasing)
@@ -1036,8 +1171,8 @@ class CapillaryAnalyzer(QMainWindow):
 
         right_layout.addLayout(slider_layout)
 
-        main_layout.addWidget(control_panel, 1)
-        main_layout.addLayout(right_layout, 3)
+        main_layout.addWidget(control_panel)
+        main_layout.addWidget(self.graphics_view, 1)
 
         self.original_image = None
         self.image_item = None
@@ -1052,6 +1187,18 @@ class CapillaryAnalyzer(QMainWindow):
         self.ceiling_line = None
         self.floor_line = None
         self.scale_factor = 1.0
+
+        self.zoom_factor = 1.0
+        self.zoom_indicator = QLabel(self)
+        self.zoom_indicator.setStyleSheet("""
+                    QLabel {
+                        background-color: rgba(52, 73, 94, 180);
+                        color: white;
+                        border-radius: 10px;
+                        padding: 5px;
+                    }
+                """)
+        self.zoom_indicator.hide()
 
         self.wall_thickness_input.setStyleSheet("""
                         QLineEdit {
@@ -1372,7 +1519,6 @@ class CapillaryAnalyzer(QMainWindow):
         dialog = AboutDialog(self)
         dialog.resize(self.size())
         dialog.show()
-
 
     def load_config(self):
         if os.path.exists(self.config_path):
@@ -1959,6 +2105,9 @@ class CapillaryAnalyzer(QMainWindow):
                 self.scene.setSceneRect(self.image_item.boundingRect())
                 self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
+                # Set the image for the minimap
+                self.graphics_view.set_image(pixmap)
+
                 # Calculate scale factor based on image size
                 base_width = 1000  # You can adjust this value
                 self.scale_factor = self.original_image.width() / base_width
@@ -1972,6 +2121,8 @@ class CapillaryAnalyzer(QMainWindow):
                 print(f"Image size: {self.original_image.width()}x{self.original_image.height()}")
                 print(f"Scale factor: {self.scale_factor}")
 
+                self.graphics_view.update_minimap()
+
                 # Automatically start ceiling selection
                 self.set_ceiling_mode()
 
@@ -1984,24 +2135,71 @@ class CapillaryAnalyzer(QMainWindow):
         super().resizeEvent(event)
         if self.image_item:
             self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.graphics_view.update_minimap()
+
+    def update_zoom_indicator_position(self):
+        self.zoom_indicator.move(self.graphics_view.width() - self.zoom_indicator.width() - 10,
+                                 self.graphics_view.height() - self.zoom_indicator.height() - 10)
+
+    def wheelEvent(self, event):
+        if self.image_item:
+            # Zoom factor
+            zoom_in_factor = 1.03
+            zoom_out_factor = 1 / zoom_in_factor
+
+            # Set anchor point
+            self.graphics_view.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+
+            # Save the scene pos
+            old_pos = self.graphics_view.mapToScene(event.pos())
+
+            # Zoom
+            if event.angleDelta().y() > 0:
+                zoom_factor = zoom_in_factor
+                self.zoom_factor *= zoom_factor
+            else:
+                zoom_factor = zoom_out_factor
+                self.zoom_factor /= zoom_in_factor
+
+            self.graphics_view.scale(zoom_factor, zoom_factor)
+
+            # Get the new position
+            new_pos = self.graphics_view.mapToScene(event.pos())
+
+            # Move scene to old position
+            delta = new_pos - old_pos
+            self.graphics_view.translate(delta.x(), delta.y())
+
+            # Update zoom indicator
+            self.update_zoom_indicator()
+
+    def update_zoom_indicator(self):
+        zoom_percentage = int(self.zoom_factor * 100)
+        self.zoom_indicator.setText(f"Zoom: {zoom_percentage}%")
+        self.zoom_indicator.adjustSize()
+        self.update_zoom_indicator_position()
+        self.zoom_indicator.show()
+        QTimer.singleShot(2000, self.zoom_indicator.hide)
+
 
     def set_ceiling_mode(self):
         if not self.check_image_loaded():
             return
         self.current_mode = "ceiling"
-        self.graphics_view.viewport().setCursor(self.ceiling_cursor)
-        self.graphics_view.viewport().update()  # Force an update
-        QApplication.processEvents()  # Process any pending events
+        self.graphics_view.setCursor(self.ceiling_cursor)
+        self.graphics_view.viewport().update()
+        QApplication.processEvents()
         self.show_info_message("Set Ceiling", "Click on the image to set the ceiling of the capillary.", legacy=True)
 
     def set_floor_mode(self):
         if not self.check_image_loaded():
             return
         self.current_mode = "floor"
-        self.graphics_view.viewport().setCursor(self.floor_cursor)
+        self.graphics_view.setCursor(self.floor_cursor)
         self.graphics_view.viewport().update()
         QApplication.processEvents()
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
+
 
     def point_to_menu_item(self, menu_name, item_name):
         menu = next((action.menu() for action in self.menuBar().actions() if action.text() == menu_name), None)
@@ -2038,40 +2236,32 @@ class CapillaryAnalyzer(QMainWindow):
         if self.original_image and self.graphics_view.underMouse():
             scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
 
-            if self.current_mode == "ceiling":
-                self.ceiling_y = scene_pos.y()
-                self.current_mode = None
-                self.graphics_view.viewport().setCursor(Qt.BlankCursor)
-                QApplication.processEvents()
-                self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
-                self.graphics_view.viewport().update()
-                QApplication.processEvents()
-                self.update_lines()
-                self.set_floor_mode()
-            elif self.current_mode == "floor":
-                self.floor_y = scene_pos.y()
-                self.graphics_view.viewport().setCursor(Qt.BlankCursor)
-                QApplication.processEvents()
-                self.current_mode = None
-                self.graphics_view.viewport().setCursor(Qt.ArrowCursor)
-                self.graphics_view.viewport().update()
-                QApplication.processEvents()
-                self.update_lines()
-                self.show_info_message("",
-                                       "Ceiling and floor have been set.",
-                                       legacy=True)
-            else:  # particle adding
-                x, y = scene_pos.x(), scene_pos.y()
-                height = self.calculate_height(x, y)
-                particle = {
-                    'x': x,
-                    'y': y,
-                    'name': f'P{len(self.particles) + 1}',
-                    'height': height,
-                    'label_pos': QPointF(x + 10, y - 60)
-                }
-                self.particles.append(particle)
-                self.draw_particles()
+            if event.button() == Qt.LeftButton:
+                if self.current_mode == "ceiling":
+                    self.ceiling_y = scene_pos.y()
+                    self.current_mode = None
+                    self.graphics_view.setCursor(Qt.ArrowCursor)
+                    self.update_lines()
+                    self.set_floor_mode()
+                elif self.current_mode == "floor":
+                    self.floor_y = scene_pos.y()
+                    self.current_mode = None
+                    self.graphics_view.setCursor(Qt.ArrowCursor)
+                    self.update_lines()
+                    self.show_info_message("", "Ceiling and floor have been set.", legacy=True)
+                else:  # particle adding
+                    x, y = scene_pos.x(), scene_pos.y()
+                    height = self.calculate_height(x, y)
+                    particle = {
+                        'x': x,
+                        'y': y,
+                        'name': f'P{len(self.particles) + 1}',
+                        'height': height,
+                        'label_pos': QPointF(x + 10, y - 60)
+                    }
+                    self.particles.append(particle)
+                    self.draw_particles()
+
 
     def update_particle_name(self, label, new_name):
         for particle in self.particles:
@@ -2535,9 +2725,9 @@ if __name__ == "__main__":
         if platform.system() == 'Darwin':
             app.setAttribute(Qt.AA_DontUseNativeMenuBar, False)
 
-        app_logger.info("Creating mainframe...")
+        app_logger.info("Creating main window...")
         window = CapillaryAnalyzer()
-        app_logger.info("Showing mainframe...")
+        app_logger.info("Showing main window...")
         window.show()
         app_logger.info("Entering main event loop...")
         sys.exit(app.exec_())
