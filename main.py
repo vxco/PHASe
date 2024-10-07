@@ -72,10 +72,10 @@ try:
 
     from PyQt5.QtCore import (Qt, QPoint, QPointF, QRectF, QLineF, pyqtSignal,
                               QObject, QSize, QTimer, QBuffer, QPropertyAnimation,
-                              QEasingCurve, QByteArray, QEventLoop, QParallelAnimationGroup, QEvent, QRect)
+                              QEasingCurve, QByteArray, QEventLoop, QParallelAnimationGroup, QEvent, QRect,pyqtProperty)
 
     from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QImage, QFont, QPalette, QIcon, QCursor, QFontDatabase,
-                             QLinearGradient, QRadialGradient, QRegion, QTransform)
+                             QLinearGradient, QRadialGradient, QRegion, QTransform, QPainterPath)
 
     from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QInputDialog,
                                  QVBoxLayout, QHBoxLayout, QWidget, QGraphicsScene, QGraphicsView,
@@ -84,7 +84,7 @@ try:
                                  QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect,
                                  QGraphicsEllipseItem, QCheckBox, QLineEdit, QFileDialog,
                                  QMessageBox, QGraphicsOpacityEffect, QSlider, QDialog, QComboBox, QGroupBox,
-                                 QFormLayout)
+                                 QFormLayout, QStyleOptionSlider, QStyle)
 
     app_logger.info("All modules imported successfully")
 
@@ -120,6 +120,188 @@ def absolute_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
+
+class AnimatedModeIcon(QPushButton):
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(50, 50)
+
+        self._pan_icon = QSvgRenderer(absolute_path("assets/pan_icon.svg"))
+        self._particle_icon = QSvgRenderer(absolute_path("assets/particle_icon.svg"))
+
+        self._animation_progress = 0.0
+        self._is_particle_mode = False
+
+        self.animation = QPropertyAnimation(self, b"animation_progress", self)
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.InOutQuad)
+
+        self.clicked.connect(self.toggle_mode)
+
+    @pyqtProperty(float)
+    def animation_progress(self):
+        return self._animation_progress
+
+    @animation_progress.setter
+    def animation_progress(self, value):
+        self._animation_progress = value
+        self.update()
+
+    def toggle_mode(self):
+        self._is_particle_mode = not self._is_particle_mode
+        start, end = (0.0, 1.0) if self._is_particle_mode else (1.0, 0.0)
+        self.animation.setStartValue(start)
+        self.animation.setEndValue(end)
+        self.animation.start()
+        self.toggled.emit(self._is_particle_mode)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw background
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(52, 73, 94))
+        painter.drawRoundedRect(self.rect(), 10, 10)
+
+        # Set up the icon rect
+        icon_rect = QRectF(self.rect()).adjusted(5, 5, -5, -5)
+
+        # Use opacity to blend between the two icons
+        painter.setOpacity(1 - self._animation_progress)
+        self._pan_icon.render(painter, icon_rect)
+
+        painter.setOpacity(self._animation_progress)
+        self._particle_icon.render(painter, icon_rect)
+
+        # Reset opacity for text
+        painter.setOpacity(1.0)
+
+        # Draw text label
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(self.rect(), Qt.AlignBottom | Qt.AlignHCenter,
+                         "Particle" if self._is_particle_mode else "Pan")
+
+    def sizeHint(self):
+        return QSize(50, 50)
+
+class CoolModeSwitch(QWidget):
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(100, 40)
+        self._is_particle_mode = True
+        self._handle_position = 60.0
+        self._icon_to_draw = 'particle'  # New attribute to control which icon to draw
+
+        # Load icons
+        self.pan_icon = QPixmap(absolute_path("assets/pan_icon.svg")).scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.particle_icon = QPixmap(absolute_path("assets/particle_icon.svg")).scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+        self.animation = QPropertyAnimation(self, b"handle_position", self)
+        self.animation.setEasingCurve(QEasingCurve.InOutExpo)
+        self.animation.setDuration(300)
+        self.animation.finished.connect(self.animation_finished)
+
+    @pyqtProperty(float)
+    def handle_position(self):
+        return self._handle_position
+
+    @handle_position.setter
+    def handle_position(self, pos):
+        self._handle_position = pos
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Draw background
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(52, 73, 94))
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), 20, 20)
+
+        # Draw icons
+        painter.drawPixmap(10, 5, self.pan_icon)
+        painter.drawPixmap(60, 5, self.particle_icon)
+
+        # Draw sliding handle
+        painter.setBrush(QColor(41, 128, 185))
+        handle_rect = QRectF(self._handle_position, 0, 40, 40)
+        painter.drawRoundedRect(handle_rect, 20, 20)
+
+        # Draw icon on handle
+        handle_icon_x = int(self._handle_position) + 5
+        if self._icon_to_draw == 'particle':
+            painter.drawPixmap(handle_icon_x, 5, self.particle_icon)
+        else:
+            painter.drawPixmap(handle_icon_x, 5, self.pan_icon)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.toggle()
+            event.accept()
+
+    def toggle(self):
+        self._is_particle_mode = not self._is_particle_mode
+        target_pos = 60 if self._is_particle_mode else 0
+        self.animation.setStartValue(self._handle_position)
+        self.animation.setEndValue(target_pos)
+        self.animation.start()
+
+    def animation_finished(self):
+        self._icon_to_draw = 'particle' if self._is_particle_mode else 'pan'
+        self.update()
+        self.toggled.emit(self._is_particle_mode) #deor
+
+class ZoomSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Vertical, parent)
+        self.setRange(10, 400)  # 10% to 400% zoom
+        self.setValue(100)  # Start at 100% zoom
+        self.setTickPosition(QSlider.TicksRight)
+        self.setTickInterval(50)
+        self.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: #34495e;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QSlider::handle:vertical {
+                background: #3498db;
+                height: 20px;
+                width: 20px;
+                margin: 0 -5px;
+                border-radius: 10px;
+            }
+            QSlider::add-page:vertical {
+                background: #2c3e50;
+            }
+            QSlider::sub-page:vertical {
+                background: #3498db;
+            }
+        """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+
+        # Draw zoom percentage text
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        painter.setPen(Qt.white)
+        zoom = self.value()
+        rect = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+        painter.drawText(rect, Qt.AlignCenter, f"{zoom}%")
 
 class AboutDialog(QWidget):
     def __init__(self, parent=None):
@@ -284,23 +466,80 @@ class AboutDialog(QWidget):
                 self.close()
 
 
-
 class Minimap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(150, 150)  # Increased size for better visibility
+        self.setFixedSize(150, 150)
         self.view_rect = QRectF()
         self.full_rect = QRectF()
         self.pixmap = None
+        self.dragging = False
+        self.drag_start = QPointF()
+        self.view_rect_start = QRectF()
         self.hide()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if self.view_rect.contains(event.pos()):
+                self.dragging = True
+                self.drag_start = event.pos()
+                self.view_rect_start = self.view_rect
+            else:
+                self.move_view(event.pos())
+
+    def mouseMoveEvent(self, event):
+        if self.dragging:
+            delta = event.pos() - self.drag_start
+            new_view_rect = self.view_rect_start.translated(delta)
+
+            # Constrain the view rectangle within the minimap
+            if new_view_rect.left() < 0:
+                new_view_rect.moveLeft(0)
+            if new_view_rect.right() > self.width():
+                new_view_rect.moveRight(self.width())
+            if new_view_rect.top() < 0:
+                new_view_rect.moveTop(0)
+            if new_view_rect.bottom() > self.height():
+                new_view_rect.moveBottom(self.height())
+
+            self.move_view(new_view_rect.center())
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dragging = False
+
+    def move_view(self, pos):
+        if self.full_rect.isNull():
+            return
+        x_ratio = self.full_rect.width() / self.width()
+        y_ratio = self.full_rect.height() / self.height()
+        new_center = QPointF(pos.x() * x_ratio + self.full_rect.x(),
+                             pos.y() * y_ratio + self.full_rect.y())
+        self.parent().center_on(new_center)
 
     def set_pixmap(self, pixmap):
         self.pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.update()
 
+    def map_rect_to_minimap(self, rect, full_rect):
+        if full_rect.width() == 0 or full_rect.height() == 0:
+            return QRectF()  # Return an empty QRectF if the full_rect has zero width or height
+        x_ratio = self.width() / full_rect.width()
+        y_ratio = self.height() / full_rect.height()
+        return QRectF(
+            (rect.x() - full_rect.x()) * x_ratio,
+            (rect.y() - full_rect.y()) * y_ratio,
+            rect.width() * x_ratio,
+            rect.height() * y_ratio
+        )
+
     def update_rects(self, view_rect, full_rect):
-        self.view_rect = view_rect
-        self.full_rect = full_rect
+        if full_rect.isNull() or full_rect.isEmpty():
+            self.view_rect = QRectF()
+            self.full_rect = QRectF()
+        else:
+            self.view_rect = self.map_rect_to_minimap(view_rect, full_rect)
+            self.full_rect = full_rect
         self.update()
 
     def paintEvent(self, event):
@@ -322,17 +561,9 @@ class Minimap(QWidget):
 
         # Draw view area
         if not self.full_rect.isNull():
-            x_ratio = self.width() / self.full_rect.width()
-            y_ratio = self.height() / self.full_rect.height()
-            view_rect = QRectF(
-                (self.view_rect.x() - self.full_rect.x()) * x_ratio,
-                (self.view_rect.y() - self.full_rect.y()) * y_ratio,
-                self.view_rect.width() * x_ratio,
-                self.view_rect.height() * y_ratio
-            )
-            painter.fillRect(view_rect, QColor(52, 152, 219, 120))
+            painter.fillRect(self.view_rect, QColor(52, 152, 219, 120))
             painter.setPen(QPen(Qt.white, 2))
-            painter.drawRect(view_rect)
+            painter.drawRect(self.view_rect)
 
 
 class CustomGraphicsView(QGraphicsView):
@@ -344,71 +575,102 @@ class CustomGraphicsView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setDragMode(QGraphicsView.NoDrag)
-        self.setInteractive(True)
-        self.setMouseTracking(True)
-        self.pan_active = False
-        self.zoom_factor = 1.0
-        self.zoom_step = 0.002
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.setOptimizationFlags(QGraphicsView.DontAdjustForAntialiasing)
 
         self.minimap = Minimap(self)
         self.minimap.move(10, 10)
 
+        self.zoom_slider = ZoomSlider(self)
+        self.zoom_slider.valueChanged.connect(self.zoom_slider_changed)
+
+        self.last_pan_pos = None
+        self.pan_inertia = QPointF(0, 0)
+        self.inertia_timer = QTimer(self)
+        self.inertia_timer.timeout.connect(self.apply_inertia)
+        self.zoom_accumulator = 0
+        self.zoom_threshold = 10
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.position_widgets()
+
+    def position_widgets(self):
+        self.minimap.move(10, 10)
+        self.zoom_slider.setGeometry(self.width() - 40, 50, 30, self.height() - 100)
+
     def wheelEvent(self, event):
-        if event.angleDelta().y() > 0:
-            factor = 1 + self.zoom_step
-        else:
-            factor = 1 - self.zoom_step
+        if event.phase() == Qt.ScrollBegin:
+            self.zoom_accumulator = 0
 
-        self.zoom_factor *= factor
+        self.zoom_accumulator += event.angleDelta().y()
 
-        # Limit zoom out to 10% of original size
-        if self.zoom_factor < 0.1:
-            factor = 0.1 / self.zoom_factor
-            self.zoom_factor = 0.1
+        if abs(self.zoom_accumulator) >= self.zoom_threshold:
+            zoom_factor = 1 + (self.zoom_accumulator / 1000)
+            self.scale(zoom_factor, zoom_factor)
+            self.zoom_accumulator = 0
 
-        # Limit zoom in to 1000% of original size
-        elif self.zoom_factor > 10:
-            factor = 10 / self.zoom_factor
-            self.zoom_factor = 10
+            current_zoom = self.transform().m11() * 100
+            self.zoom_slider.setValue(int(current_zoom))
 
-        self.scale(factor, factor)
+        if event.phase() == Qt.ScrollEnd:
+            self.zoom_accumulator = 0
+
         self.update_minimap()
+        event.accept()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self.pan_active = True
-            self.pan_start = event.pos()
+        if event.button() == Qt.LeftButton:
             self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
-        else:
-            super().mousePressEvent(event)
+            self.last_pan_pos = event.pos()
+            self.pan_inertia = QPointF(0, 0)
+            self.inertia_timer.stop()
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.pan_active:
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - (event.x() - self.pan_start.x()))
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - (event.y() - self.pan_start.y()))
-            self.pan_start = event.pos()
+        if event.buttons() == Qt.LeftButton and self.last_pan_pos:
+            delta = event.pos() - self.last_pan_pos
+            self.pan_inertia = 0.9 * self.pan_inertia + 0.1 * QPointF(delta)
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.last_pan_pos = event.pos()
             self.update_minimap()
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self.pan_active = False
+        if event.button() == Qt.LeftButton:
             self.setCursor(Qt.ArrowCursor)
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
+            self.last_pan_pos = None
+            self.inertia_timer.start(16)
+        super().mouseReleaseEvent(event)
+
+    def apply_inertia(self):
+        if self.pan_inertia.manhattanLength() < 0.1:
+            self.inertia_timer.stop()
+            return
+
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(self.pan_inertia.x()))
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(self.pan_inertia.y()))
+        self.pan_inertia *= 0.95
+        self.update_minimap()
+
+    def zoom_slider_changed(self, value):
+        current_zoom = self.transform().m11() * 100
+        zoom_factor = value / current_zoom
+        self.scale(zoom_factor, zoom_factor)
+        self.update_minimap()
+
+    def center_on(self, pos):
+        self.centerOn(pos)
+        self.update_minimap()
 
     def set_image(self, pixmap):
         self.minimap.set_pixmap(pixmap)
 
     def update_minimap(self):
-        if self.zoom_factor > 1.0:
-            self.minimap.show()
+        if self.scene() and not self.scene().sceneRect().isEmpty():
             view_rect = self.mapToScene(self.viewport().rect()).boundingRect()
-            self.minimap.update_rects(view_rect, self.sceneRect())
+            self.minimap.update_rects(view_rect, self.scene().sceneRect())
         else:
             self.minimap.hide()
 
@@ -1137,6 +1399,15 @@ class CapillaryAnalyzer(QMainWindow):
 
         control_layout.addLayout(reset_clear_layout)
 
+        # Create mode switch
+        self.mode_switch = CoolModeSwitch()
+        self.mode_switch.toggled.connect(self.toggle_mode)
+
+        # Add mode switch to control panel
+        control_layout.addWidget(self.mode_switch, alignment=Qt.AlignCenter)
+
+        self.current_mode = "particle"  # Default mode
+
         control_layout.addStretch()
 
         self.graphics_view = CustomGraphicsView()
@@ -1220,6 +1491,19 @@ class CapillaryAnalyzer(QMainWindow):
         self.height_input_valid = False
 
         QTimer.singleShot(1000, self.check_for_updates) if BETA_FEATURES_ENABLED else None
+
+    def toggle_mode(self, is_particle_mode):
+        if is_particle_mode:
+            self.current_mode = "particle"
+            self.graphics_view.setDragMode(QGraphicsView.NoDrag)
+            self.graphics_view.setCursor(Qt.ArrowCursor)
+            self.show_toast("Switched to Particle Mode", message_type="info")
+        else:
+            self.current_mode = "pan"
+            self.graphics_view.setDragMode(QGraphicsView.ScrollHandDrag)
+            self.graphics_view.setCursor(Qt.OpenHandCursor)
+            self.show_toast("Switched to Pan Mode", message_type="info")
+
 
     def process_height_input(self):
         input_text = self.height_input.text().strip().lower()
@@ -1547,6 +1831,7 @@ class CapillaryAnalyzer(QMainWindow):
             ("Export Data", "When you're done, click this button to save your data as a CSV file.", self.export_button),
             ("Reset and Clear", "Use these buttons to reset the angle or clear all particle selections.",
              self.reset_angle_button),
+            ("Modes", "Select between Handle and Analyze modes to either use clicking for panning or setting stuff.", self.mode_switch),
             ("Height Reference", "You can find the Height Reference in the Help menu for common device dimensions.",
              "Help/Height Reference"),
             ("Save Workspace",
@@ -2135,7 +2420,7 @@ class CapillaryAnalyzer(QMainWindow):
         super().resizeEvent(event)
         if self.image_item:
             self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-        self.graphics_view.update_minimap()
+        self.graphics_view.position_widgets()
 
     def update_zoom_indicator_position(self):
         self.zoom_indicator.move(self.graphics_view.width() - self.zoom_indicator.width() - 10,
@@ -2185,7 +2470,9 @@ class CapillaryAnalyzer(QMainWindow):
     def set_ceiling_mode(self):
         if not self.check_image_loaded():
             return
-        self.current_mode = "ceiling"
+        self.current_mode = "particle"
+        self.mode_switch.toggle()  # Ensure switch is in particle mode
+        self.graphics_view.setDragMode(QGraphicsView.NoDrag)
         self.graphics_view.setCursor(self.ceiling_cursor)
         self.graphics_view.viewport().update()
         QApplication.processEvents()
@@ -2194,11 +2481,14 @@ class CapillaryAnalyzer(QMainWindow):
     def set_floor_mode(self):
         if not self.check_image_loaded():
             return
-        self.current_mode = "floor"
+        self.current_mode = "particle"
+        self.mode_switch.toggle()  # Ensure switch is in particle mode
+        self.graphics_view.setDragMode(QGraphicsView.NoDrag)
         self.graphics_view.setCursor(self.floor_cursor)
         self.graphics_view.viewport().update()
         QApplication.processEvents()
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
+
 
 
     def point_to_menu_item(self, menu_name, item_name):
@@ -2237,30 +2527,27 @@ class CapillaryAnalyzer(QMainWindow):
             scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
 
             if event.button() == Qt.LeftButton:
-                if self.current_mode == "ceiling":
-                    self.ceiling_y = scene_pos.y()
-                    self.current_mode = None
-                    self.graphics_view.setCursor(Qt.ArrowCursor)
-                    self.update_lines()
-                    self.set_floor_mode()
-                elif self.current_mode == "floor":
-                    self.floor_y = scene_pos.y()
-                    self.current_mode = None
-                    self.graphics_view.setCursor(Qt.ArrowCursor)
-                    self.update_lines()
-                    self.show_info_message("", "Ceiling and floor have been set.", legacy=True)
-                else:  # particle adding
-                    x, y = scene_pos.x(), scene_pos.y()
-                    height = self.calculate_height(x, y)
-                    particle = {
-                        'x': x,
-                        'y': y,
-                        'name': f'P{len(self.particles) + 1}',
-                        'height': height,
-                        'label_pos': QPointF(x + 10, y - 60)
-                    }
-                    self.particles.append(particle)
-                    self.draw_particles()
+                if self.current_mode == "particle":
+                    if self.ceiling_y is None:
+                        self.ceiling_y = scene_pos.y()
+                        self.update_lines()
+                        self.show_info_message("Ceiling Set", "Now click to set the floor.", legacy=True)
+                    elif self.floor_y is None:
+                        self.floor_y = scene_pos.y()
+                        self.update_lines()
+                        self.show_info_message("Floor Set", "You can now add particles.", legacy=True)
+                    else:
+                        x, y = scene_pos.x(), scene_pos.y()
+                        height = self.calculate_height(x, y)
+                        particle = {
+                            'x': x,
+                            'y': y,
+                            'name': f'P{len(self.particles) + 1}',
+                            'height': height,
+                            'label_pos': QPointF(x + 10, y - 60)
+                        }
+                        self.particles.append(particle)
+                        self.draw_particles()
 
 
     def update_particle_name(self, label, new_name):
@@ -2485,7 +2772,7 @@ class CapillaryAnalyzer(QMainWindow):
 
                 # Scale the line width
                 line = QGraphicsLineItem()
-                line.setPen(QPen(QColor(255, 255, 255), max(1, int(self.scale_factor)), Qt.DashLine))
+                line.setPen(QPen(QColor(255, 255, 255), max(2, int(self.scale_factor)), Qt.DashLine))
                 self.scene.addItem(line)
 
                 particle['label_item'] = label
