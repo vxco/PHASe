@@ -2,17 +2,17 @@
   "Ariphanil": {
     "9.3.3": {
       "wall_thickness": 400,
-      "magnet_distance": 3,
+      "magnet_distance": 24,
       "inner_width": 2400
     },
     "9.4.3": {
-      "wall_thickness": 525,
-      "magnet_distance": 3.25,
+      "wall_thickness": 10800,
+      "magnet_distance": 24,
       "inner_width": 2400
     },
     "9.5.3": {
       "wall_thickness": 650,
-      "magnet_distance": 3.5,
+      "magnet_distance": 24,
       "inner_width": 2400
     }
   },
