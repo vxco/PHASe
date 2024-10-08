@@ -8,7 +8,8 @@ from PyQt5.QtSvg import QSvgRenderer
 CURRENT_VERSION = "3.5.0"
 CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
-BETA_FEATURES_ENABLED = False
+BETA_FEATURES_ENABLED = True
+AUTO_UPDATE_ENABLED = False
 
 cursorCustom = False
 
@@ -65,6 +66,9 @@ try:
     import math
     import traceback
     import platform
+    import pickle
+    import base64
+    import io
     import subprocess
     import tempfile
     from urllib.request import urlretrieve
@@ -919,6 +923,7 @@ class CustomGraphicsScene(QGraphicsScene):
                 start = QPointF(particle['x'], particle['y'])
                 end = label.sceneBoundingRect().center()
                 line.setLine(QLineF(start, end))
+                self.set_unsaved_changes()
 
 
 class DraggableLabelSignals(QObject):
@@ -1108,7 +1113,7 @@ class DraggableLabel(QGraphicsItemGroup):
         for name in self.analyzer.used_names:
             names_submenu.addAction(name)
 
-        notes_action = menu.addAction("Notes...") if BETA_FEATURES_ENABLED else None
+        notes_action = menu.addAction("Notes...") if AUTO_UPDATE_ENABLED else None
 
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
@@ -1131,6 +1136,7 @@ class DraggableLabel(QGraphicsItemGroup):
             self.notes = dialog.textValue()
             self.analyzer.update_particle_data(self, {'notes': self.notes})
             self.analyzer.show_toast(f"Notes updated for {self.name}", message_type="info")
+            self.analyzer.set_unsaved_changes()
 
     def rename(self):
         dialog = self.analyzer.create_styled_input_dialog("Rename Particle", "Enter new name:", self.name or "")
@@ -1141,6 +1147,7 @@ class DraggableLabel(QGraphicsItemGroup):
                 self.analyzer.add_used_name(self.name)
             self.update_label_text()
             self.analyzer.update_particle_data(self, {'name': self.name, 'x': self.x, 'y': self.y})
+        self.analyzer.set_unsaved_changes()
 
     def get_label_text(self):
         if self.name:
@@ -1151,6 +1158,8 @@ class DraggableLabel(QGraphicsItemGroup):
     def update_height(self, new_height):
         self.height = new_height
         self.update_label_text()
+        self.analyzer.set_unsaved_changes()
+
 
     def update_label_text(self):
         label_text = self.get_label_text()
@@ -1180,10 +1189,12 @@ class DraggableLabel(QGraphicsItemGroup):
         cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
         cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
         delete_cross.setPos(cross_x, cross_y)
+        self.analyzer.set_unsaved_changes()
 
     def itemChange(self, change, value):
         if change == QGraphicsItemGroup.ItemPositionHasChanged:
             self.signals.moved.emit(self)
+            self.analyzer.set_unsaved_changes()
         return super().itemChange(change, value)
 
 
@@ -1206,6 +1217,7 @@ class CapillaryAnalyzer(QMainWindow):
                 font-size: 14px;
             }
         """)
+
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -1279,9 +1291,31 @@ class CapillaryAnalyzer(QMainWindow):
         # Logo space
         logo_label = QLabel()
         logo_pixmap = QPixmap(absolute_path("assets/phase_logo_v3.svg"))
-        logo_label.setPixmap(logo_pixmap.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo_label.setPixmap(logo_pixmap.scaled(120, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         logo_label.setAlignment(Qt.AlignCenter)
         control_layout.addWidget(logo_label)
+
+        self.workspace_name_input = QLineEdit("Untitled Workspace")
+        self.workspace_name_input.setReadOnly(True)
+        self.workspace_name_input.setStyleSheet("""
+                    QLineEdit {
+                        background-color: transparent;
+                        border: none;
+                        color: white;
+                        font-size: 18px;
+                        font-weight: bold;
+                    }
+                    QLineEdit:focus {
+                        background-color: #34495e;
+                        border: 1px solid #3498db;
+                    }
+                """)
+        self.workspace_name_input.mousePressEvent = self.edit_workspace_name
+
+        # Add the workspace name input to the layout
+        control_layout.insertWidget(1, self.workspace_name_input)
+
+        self.workspace_name_input.editingFinished.connect(self.finish_editing_workspace_name)
 
         # Load Image button (spans two button widths)
         self.load_button = ModernButton("assets/load_image_btn.svg", "Load Image")
@@ -1328,6 +1362,12 @@ class CapillaryAnalyzer(QMainWindow):
         # Height and Wall Thickness Layout
         height_wall_layout = QGridLayout()
 
+        self.unsaved_changes = False
+        self.current_workspace_file = None
+        self.recent_files = []
+        self.max_recent_files = 5
+
+        self.load_recent_files()
         self.create_menu_bar()
 
         # Height Input
@@ -1535,7 +1575,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.toast_label = None
         self.height_input_valid = False
 
-        QTimer.singleShot(1000, self.check_for_updates) if BETA_FEATURES_ENABLED else None
+        QTimer.singleShot(1000, self.check_for_updates) if AUTO_UPDATE_ENABLED else None
 
     def toggle_mode(self, is_particle_mode):
         if is_particle_mode:
@@ -1649,8 +1689,14 @@ class CapillaryAnalyzer(QMainWindow):
 
         if BETA_FEATURES_ENABLED:
             save_workspace_action = QAction('Save Workspace', self)
+            save_workspace_action.setShortcut('Ctrl+S')
             save_workspace_action.triggered.connect(self.save_workspace)
             file_menu.addAction(save_workspace_action)
+
+            save_workspace_as_action = QAction('Save Workspace As...', self)
+            save_workspace_as_action.setShortcut('Ctrl+Shift+S')
+            save_workspace_as_action.triggered.connect(self.save_workspace_as)
+            file_menu.addAction(save_workspace_as_action)
 
             load_workspace_action = QAction('Load Workspace', self)
             load_workspace_action.triggered.connect(self.load_workspace)
@@ -1658,9 +1704,10 @@ class CapillaryAnalyzer(QMainWindow):
 
             file_menu.addSeparator()
 
-            check_updates_action = QAction('Check for Updates', self)
-            check_updates_action.triggered.connect(self.check_for_updates)
-            file_menu.addAction(check_updates_action)
+            self.recent_files_menu = file_menu.addMenu('Recent Files')
+            self.update_recent_files_menu()
+
+            file_menu.addSeparator()
 
         exit_action = QAction('Exit', self)
         exit_action.triggered.connect(self.close)
@@ -1847,6 +1894,37 @@ class CapillaryAnalyzer(QMainWindow):
         except Exception as e:
             self.show_error_message("Error", f"Failed to load height reference data: {str(e)}")
 
+    def update_recent_files_menu(self):
+        self.recent_files_menu.clear()
+        for file in self.recent_files:
+            action = QAction(file, self)
+            action.triggered.connect(lambda checked, f=file: self.load_workspace(file))
+            self.recent_files_menu.addAction(action)
+
+    def load_recent_files(self):
+        try:
+            with open(os.path.join(self.config_dir, 'recent_files.txt'), 'r') as f:
+                self.recent_files = [line.strip() for line in f.readlines()]
+        except FileNotFoundError:
+            self.recent_files = []
+
+    def save_recent_files(self):
+        with open(os.path.join(self.config_dir, 'recent_files.txt'), 'w') as f:
+            for file in self.recent_files:
+                f.write(f"{file}\n")
+
+    def add_recent_file(self, file_path):
+        if file_path in self.recent_files:
+            self.recent_files.remove(file_path)
+        self.recent_files.insert(0, file_path)
+        self.recent_files = self.recent_files[:self.max_recent_files]
+        self.save_recent_files()
+        self.update_recent_files_menu()
+
+    def set_unsaved_changes(self, value=True):
+        self.unsaved_changes = value
+        self.update_window_title()
+
     def show_about_dialog(self):
         dialog = AboutDialog(self)
         dialog.resize(self.size())
@@ -1895,6 +1973,23 @@ class CapillaryAnalyzer(QMainWindow):
         ]
         self.current_tour_step = 0
         self.next_tour_step()
+
+    def closeEvent(self, event):
+        if self.unsaved_changes:
+            reply = QMessageBox.question(self, f'Unsaved Changes to ',
+                                         "You have unsaved changes. Do you want to save before closing? All Unsaved changes will be destroyed!",
+                                         QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                         QMessageBox.Save)
+            if reply == QMessageBox.Save:
+                self.save_workspace()
+                self.show_info_message("", "Saved Workspace. Closing!", legacy=True)
+                event.accept()
+            elif reply == QMessageBox.Discard:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
     def clear_workspace(self):
         self.show_info_message(
@@ -2053,47 +2148,91 @@ class CapillaryAnalyzer(QMainWindow):
                 particle['label_item'].setScale(scale)
         self.update_connection_lines()
         self.scene.update()
+        self.set_unsaved_changes()
+
+    def edit_workspace_name(self, event):
+        self.workspace_name_input.setReadOnly(False)
+        self.workspace_name_input.setFocus()
+        self.workspace_name_input.selectAll()
+        self.set_unsaved_changes()
 
     def save_workspace(self):
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Workspace", "", "PHASe Workspace Files (*.phw)")
+        if self.current_workspace_file:
+            self.perform_save(self.current_workspace_file)
+        else:
+            self.save_workspace_as()
+
+    def save_workspace_as(self):
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save Workspace As", "", "PHASe Workspace Files (*.phw)")
+        if file_name:
+            self.perform_save(file_name)
+            self.current_workspace_file = file_name
+            self.add_recent_file(file_name)
+
+    def perform_save(self, file_name):
+        try:
+            workspace_data = {
+                'name': self.workspace_name_input.text(),
+                'capillary_height': self.capillary_height,
+                'ceiling_y': self.ceiling_y,
+                'floor_y': self.floor_y,
+                'angle_value': self.angle_value,
+                'wall_thickness': self.wall_thickness,
+                'particles': [
+                    {
+                        'x': p['x'],
+                        'y': p['y'],
+                        'name': p['name'],
+                        'height': p['height'],
+                        'label_pos': p['label_item'].pos() if 'label_item' in p else None
+                    }
+                    for p in self.particles
+                ],
+                'used_names': list(self.used_names)
+            }
+
+            if self.original_image:
+                buffer = QBuffer()
+                buffer.open(QBuffer.ReadWrite)
+                self.original_image.save(buffer, "PNG")
+                workspace_data['image'] = base64.b64encode(buffer.data()).decode()
+
+            with open(file_name, 'wb') as f:
+                pickle.dump(workspace_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+            self.show_info_message("Workspace Saved", f"Workspace saved to {file_name}", legacy=True)
+            self.unsaved_changes = False
+            self.update_window_title()
+
+        except Exception as e:
+            self.show_error_message("Save Error", f"Error saving workspace: {str(e)}")
+            print(f"Full error: {traceback.format_exc()}")
+
+    def finish_editing_workspace_name(self):
+        self.workspace_name_input.setReadOnly(True)
+        self.update_window_title()
+
+    def load_workspace(self, file_name=None):
+        self.image_loaded = True
+        if self.unsaved_changes:
+            reply = QMessageBox.question(self, 'Unsaved Changes',
+                                         "You have unsaved changes. Do you want to save before loading a new workspace?",
+                                         QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                         QMessageBox.Save)
+            if reply == QMessageBox.Save:
+                self.save_workspace()
+            elif reply == QMessageBox.Cancel:
+                return
+
+        if not file_name:
+            file_name, _ = QFileDialog.getOpenFileName(self, "Load Workspace", "", "PHASe Workspace Files (*.phw)")
         if file_name:
             try:
-                workspace_data = {
-                    'capillary_height': self.capillary_height,
-                    'ceiling_y': self.ceiling_y,
-                    'floor_y': self.floor_y,
-                    'angle_value': self.angle_value,
-                    'wall_thickness': self.wall_thickness,
-                    'particles': [
-                        {k: serialize_qt_object(v) for k, v in p.items() if
-                         k not in ['label_item', 'dot_item', 'line_item']}
-                        for p in self.particles
-                    ],
-                    'used_names': list(self.used_names)
-                }
+                with open(file_name, 'rb') as f:
+                    workspace_data = pickle.load(f)
 
-                if self.original_image:
-                    buffer = QBuffer()
-                    buffer.open(QBuffer.ReadWrite)
-                    self.original_image.save(buffer, "PNG")
-                    workspace_data['image'] = buffer.data().toBase64().data().decode()
-
-                with open(file_name, 'w') as f:
-                    json.dump(workspace_data, f, default=serialize_qt_object)
-
-                self.show_info_message("Workspace Saved", f"Workspace saved to {file_name}", legacy=True)
-
-            except Exception as e:
-                self.show_error_message("Save Error", f"Error saving workspace: {str(e)}")
-                print(f"Full error: {traceback.format_exc()}")  # This will print the full error traceback
-
-    def load_workspace(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "Load Workspace", "", "PHASe Workspace Files (*.phw)")
-        if file_name:
-            try:
-                with open(file_name, 'r') as f:
-                    workspace_data = json.load(f, object_hook=self.deserialize_qt_object)
-
+                self.workspace_name_input.setText(workspace_data.get('name', 'Untitled Workspace'))
+                self.update_window_title()
                 self.capillary_height = workspace_data.get('capillary_height')
                 self.ceiling_y = workspace_data.get('ceiling_y')
                 self.floor_y = workspace_data.get('floor_y')
@@ -2102,8 +2241,8 @@ class CapillaryAnalyzer(QMainWindow):
                 self.used_names = set(workspace_data.get('used_names', []))
 
                 if 'image' in workspace_data:
-                    image_data = QByteArray.fromBase64(workspace_data['image'].encode())
-                    self.original_image = QImage.fromData(image_data)
+                    image_data = base64.b64decode(workspace_data['image'])
+                    self.original_image = QImage.fromData(QByteArray(image_data))
                     self.scene.clear()
                     pixmap = QPixmap.fromImage(self.original_image)
                     self.image_item = self.scene.addPixmap(pixmap)
@@ -2115,16 +2254,7 @@ class CapillaryAnalyzer(QMainWindow):
                     self.scale_factor = self.original_image.width() / base_width
 
                 # Reconstruct particles
-                self.particles = []
-                for particle_data in workspace_data.get('particles', []):
-                    particle = {
-                        'x': float(particle_data['x']),
-                        'y': float(particle_data['y']),
-                        'name': particle_data['name'],
-                        'height': float(particle_data['height']),
-                        'label_pos': deserialize_qt_object(particle_data['label_pos'])
-                    }
-                    self.particles.append(particle)
+                self.particles = workspace_data.get('particles', [])
 
                 # Update UI elements
                 self.update_ui_from_workspace()
@@ -2132,14 +2262,17 @@ class CapillaryAnalyzer(QMainWindow):
                 # Redraw particles
                 self.draw_particles()
 
+                self.current_workspace_file = file_name
+                self.add_recent_file(file_name)
+                self.unsaved_changes = False
+                self.update_window_title()
                 self.show_info_message("Workspace Loaded", f"Workspace loaded from {file_name}", legacy=True)
-
+                self.image_loaded = True
 
             except Exception as e:
-
                 self.show_error_message("Load Error", f"Error loading workspace: {str(e)}")
+                print(f"Full error: {traceback.format_exc()}")
 
-                print(f"Full error: {traceback.format_exc()}")  # This will print the full error traceback
 
     def update_ui_from_workspace(self):
         # Update height input
@@ -2320,6 +2453,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.fine_wheel.setValue(0)
         self.angle_input.setText("0.00")
         self.update_lines()
+        self.set_unsaved_changes()
 
     def clear_selections(self):
         self.ceiling_y = None
@@ -2331,7 +2465,13 @@ class CapillaryAnalyzer(QMainWindow):
         self.particles.clear()
         self.scene.update()
         self.update_lines()
+        self.set_unsaved_changes()
 
+    def update_window_title(self):
+        title = f"PHASe - {self.workspace_name_input.text()}"
+        if self.unsaved_changes:
+            title += " *"
+        self.setWindowTitle(title)
     def update_wall_thickness(self):
         if not self.check_image_loaded():
             return
@@ -2404,6 +2544,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.angle_input.setText(f"{self.angle_value:.2f}")
         self.update_lines()
         self.update_particle_heights()
+        self.set_unsaved_changes()
 
     def set_angle_from_input(self):
         if not self.check_image_loaded():
@@ -2529,6 +2670,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.show_info_message("Set Ceiling", "Click on the image to set the ceiling of the capillary.", legacy=True)
         self.cursorCustom = True
         print("cursor set custom?")
+        self.set_unsaved_changes()
 
     def set_floor_mode(self):
         if not self.check_image_loaded():
@@ -2543,6 +2685,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
         cursorCustom = True
         print("cursor set custom?")
+        self.set_unsaved_changes()
 
 
 
@@ -2557,13 +2700,14 @@ class CapillaryAnalyzer(QMainWindow):
             self.ceiling_y += direction
             self.update_lines()
             self.update_particle_heights()
+            self.set_unsaved_changes()
 
     def increment_floor(self, direction):
         if self.floor_y is not None:
             self.floor_y += direction
             self.update_lines()
             self.update_particle_heights()
-
+            self.set_unsaved_changes()
 
 
     def point_to_menu_item(self, menu_name, item_name):
@@ -2820,6 +2964,7 @@ class CapillaryAnalyzer(QMainWindow):
                 updated_particles.append((x, y, name, height, label_pos))
             self.particles = updated_particles
             self.draw_particles()
+            self.set_unsaved_changes()
 
     def draw_particles(self):
         if self.original_image and self.image_item:
