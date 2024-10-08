@@ -5,8 +5,8 @@ from logging.handlers import RotatingFileHandler
 
 from PyQt5.QtSvg import QSvgRenderer
 
-CURRENT_VERSION = "3.5.0"
-CURRENT_VERSION_NAME = "Hierapolis"
+CURRENT_VERSION = "4.0.1"
+CURRENT_VERSION_NAME = "Bosphorus"
 FAST_BOOT = True
 BETA_FEATURES_ENABLED = True
 AUTO_UPDATE_ENABLED = False
@@ -1206,7 +1206,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.initial_setup_complete = False
         self.logger = app_logger
         self.image_loaded = False
-        self.setWindowTitle("PHASe - Particle Height Analysis Software")
+        self.setWindowTitle("PHASe")
         self.setGeometry(100, 100, 1400, 900)
         self.setStyleSheet("""
             QMainWindow {
