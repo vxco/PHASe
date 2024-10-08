@@ -10,6 +10,7 @@ CURRENT_VERSION_NAME = "Hierapolis"
 FAST_BOOT = True
 BETA_FEATURES_ENABLED = False
 
+cursorCustom = False
 
 class Logger:
     def __init__(self, app_name):
@@ -469,7 +470,7 @@ class AboutDialog(QWidget):
 class Minimap(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(150, 150)
+        self.setFixedSize(200, 100)
         self.view_rect = QRectF()
         self.full_rect = QRectF()
         self.pixmap = None
@@ -569,6 +570,8 @@ class Minimap(QWidget):
 class CustomGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self.capAn = CapillaryAnalyzer
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
@@ -577,9 +580,11 @@ class CustomGraphicsView(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.setOptimizationFlags(QGraphicsView.DontAdjustForAntialiasing)
+        self.cursorCustom = cursorCustom
 
         self.minimap = Minimap(self)
         self.minimap.move(10, 10)
+        self.minimap.show()
 
         self.zoom_slider = ZoomSlider(self)
         self.zoom_slider.valueChanged.connect(self.zoom_slider_changed)
@@ -590,6 +595,11 @@ class CustomGraphicsView(QGraphicsView):
         self.inertia_timer.timeout.connect(self.apply_inertia)
         self.zoom_accumulator = 0
         self.zoom_threshold = 10
+        self.panning_enabled = True
+
+
+    def setPanningEnabled(self, enabled):
+        self.panning_enabled = enabled
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -620,7 +630,7 @@ class CustomGraphicsView(QGraphicsView):
         event.accept()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and self.panning_enabled:
             self.setCursor(Qt.ClosedHandCursor)
             self.last_pan_pos = event.pos()
             self.pan_inertia = QPointF(0, 0)
@@ -639,9 +649,19 @@ class CustomGraphicsView(QGraphicsView):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.setCursor(Qt.ArrowCursor)
-            self.last_pan_pos = None
-            self.inertia_timer.start(16)
+            if not self.cursorCustom:
+                self.setCursor(Qt.ArrowCursor)
+                print("cursor set to normal in mouseRelease under paspa")
+                self.last_pan_pos = None
+                self.inertia_timer.start(16)
+            elif self.cursorCustom:
+                self.last_pan_pos = None
+                self.inertia_timer.start(16)
+            else: #fallback
+                self.last_pan_pos = None
+                self.inertia_timer.start(16)
+                print("fallbackhappened!")
+
         super().mouseReleaseEvent(event)
 
     def apply_inertia(self):
@@ -671,6 +691,7 @@ class CustomGraphicsView(QGraphicsView):
         if self.scene() and not self.scene().sceneRect().isEmpty():
             view_rect = self.mapToScene(self.viewport().rect()).boundingRect()
             self.minimap.update_rects(view_rect, self.scene().sceneRect())
+            self.minimap.show()
         else:
             self.minimap.hide()
 
@@ -1168,7 +1189,10 @@ class DraggableLabel(QGraphicsItemGroup):
 
 class CapillaryAnalyzer(QMainWindow):
     def __init__(self):
+        self.cursorCustom = cursorCustom
         super().__init__()
+        self.current_set_mode = None
+        self.initial_setup_complete = False
         self.logger = app_logger
         self.image_loaded = False
         self.setWindowTitle("PHASe - Particle Height Analysis Software")
@@ -1277,6 +1301,27 @@ class CapillaryAnalyzer(QMainWindow):
         ceiling_floor_left.addWidget(self.set_floor_button)
 
         ceiling_floor_layout.addLayout(ceiling_floor_left)
+
+        ceiling_floor_right = QVBoxLayout()
+        ceiling_increment_layout = QHBoxLayout()
+        self.ceiling_up_button = self.create_small_button("▲")
+        self.ceiling_up_button.clicked.connect(lambda: self.increment_ceiling(1))
+        self.ceiling_down_button = self.create_small_button("▼")
+        self.ceiling_down_button.clicked.connect(lambda: self.increment_ceiling(-1))
+        ceiling_increment_layout.addWidget(self.ceiling_down_button)
+        ceiling_increment_layout.addWidget(self.ceiling_up_button)
+        ceiling_floor_right.addLayout(ceiling_increment_layout)
+
+        floor_increment_layout = QHBoxLayout()
+        self.floor_up_button = self.create_small_button("▲")
+        self.floor_up_button.clicked.connect(lambda: self.increment_floor(1))
+        self.floor_down_button = self.create_small_button("▼")
+        self.floor_down_button.clicked.connect(lambda: self.increment_floor(-1))
+        floor_increment_layout.addWidget(self.floor_down_button)
+        floor_increment_layout.addWidget(self.floor_up_button)
+        ceiling_floor_right.addLayout(floor_increment_layout)
+
+        ceiling_floor_layout.addLayout(ceiling_floor_right)
 
         control_layout.addLayout(ceiling_floor_layout)
 
@@ -1497,11 +1542,14 @@ class CapillaryAnalyzer(QMainWindow):
             self.current_mode = "particle"
             self.graphics_view.setDragMode(QGraphicsView.NoDrag)
             self.graphics_view.setCursor(Qt.ArrowCursor)
+            self.graphics_view.setPanningEnabled(False)  # Disable panning
+            print("cursor set to arrow in toggle mode under capillary analyzer")
             self.show_toast("Switched to Particle Mode", message_type="info")
         else:
             self.current_mode = "pan"
             self.graphics_view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.graphics_view.setCursor(Qt.OpenHandCursor)
+            self.graphics_view.setPanningEnabled(True)  # Enable panning
             self.show_toast("Switched to Pan Mode", message_type="info")
 
 
@@ -2400,6 +2448,7 @@ class CapillaryAnalyzer(QMainWindow):
                 self.particles = []
                 self.ceiling_y = None
                 self.floor_y = None
+                self.initial_setup_complete = False
 
                 print(f"Image loaded successfully: {file_name}")
                 self.image_loaded = True
@@ -2408,7 +2457,6 @@ class CapillaryAnalyzer(QMainWindow):
 
                 self.graphics_view.update_minimap()
 
-                # Automatically start ceiling selection
                 self.set_ceiling_mode()
 
         except Exception as e:
@@ -2421,6 +2469,7 @@ class CapillaryAnalyzer(QMainWindow):
         if self.image_item:
             self.graphics_view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         self.graphics_view.position_widgets()
+        self.graphics_view.update_minimap()
 
     def update_zoom_indicator_position(self):
         self.zoom_indicator.move(self.graphics_view.width() - self.zoom_indicator.width() - 10,
@@ -2470,24 +2519,50 @@ class CapillaryAnalyzer(QMainWindow):
     def set_ceiling_mode(self):
         if not self.check_image_loaded():
             return
-        self.current_mode = "particle"
-        self.mode_switch.toggle()  # Ensure switch is in particle mode
+        self.current_mode = "set_ceiling"
+        self.current_set_mode = "ceiling"
         self.graphics_view.setDragMode(QGraphicsView.NoDrag)
         self.graphics_view.setCursor(self.ceiling_cursor)
+
         self.graphics_view.viewport().update()
         QApplication.processEvents()
         self.show_info_message("Set Ceiling", "Click on the image to set the ceiling of the capillary.", legacy=True)
+        self.cursorCustom = True
+        print("cursor set custom?")
 
     def set_floor_mode(self):
         if not self.check_image_loaded():
             return
-        self.current_mode = "particle"
-        self.mode_switch.toggle()  # Ensure switch is in particle mode
+        self.current_mode = "set_floor"
+        self.current_set_mode = "floor"
         self.graphics_view.setDragMode(QGraphicsView.NoDrag)
         self.graphics_view.setCursor(self.floor_cursor)
+
         self.graphics_view.viewport().update()
         QApplication.processEvents()
         self.show_info_message("Set Floor", "Click on the image to set the floor of the capillary.", legacy=True)
+        cursorCustom = True
+        print("cursor set custom?")
+
+
+
+    def switch_ceiling_floor_mode(self):
+        if self.current_set_mode == "ceiling":
+            self.set_floor_mode()
+        else:
+            self.set_ceiling_mode()
+
+    def increment_ceiling(self, direction):
+        if self.ceiling_y is not None:
+            self.ceiling_y += direction
+            self.update_lines()
+            self.update_particle_heights()
+
+    def increment_floor(self, direction):
+        if self.floor_y is not None:
+            self.floor_y += direction
+            self.update_lines()
+            self.update_particle_heights()
 
 
 
@@ -2527,28 +2602,44 @@ class CapillaryAnalyzer(QMainWindow):
             scene_pos = self.graphics_view.mapToScene(self.graphics_view.mapFromGlobal(event.globalPos()))
 
             if event.button() == Qt.LeftButton:
-                if self.current_mode == "particle":
-                    if self.ceiling_y is None:
-                        self.ceiling_y = scene_pos.y()
-                        self.update_lines()
+                if self.current_mode == "set_ceiling":
+                    self.ceiling_y = scene_pos.y()
+                    self.update_lines()
+                    if not self.initial_setup_complete and self.floor_y is None:
+                        self.set_floor_mode()  # Auto-switch to floor mode only during initial setup
                         self.show_info_message("Ceiling Set", "Now click to set the floor.", legacy=True)
-                    elif self.floor_y is None:
-                        self.floor_y = scene_pos.y()
-                        self.update_lines()
-                        self.show_info_message("Floor Set", "You can now add particles.", legacy=True)
                     else:
-                        x, y = scene_pos.x(), scene_pos.y()
-                        height = self.calculate_height(x, y)
-                        particle = {
-                            'x': x,
-                            'y': y,
-                            'name': f'P{len(self.particles) + 1}',
-                            'height': height,
-                            'label_pos': QPointF(x + 10, y - 60)
-                        }
-                        self.particles.append(particle)
-                        self.draw_particles()
+                        self.show_info_message("Ceiling Set", "Ceiling has been set.", legacy=True),
+                        cursorCustom = False
+                        print("cursorcustom set to false on 2605")
+                        self.reset_cursor_and_mode()
+                elif self.current_mode == "set_floor":
+                    self.floor_y = scene_pos.y()
+                    self.update_lines()
+                    self.show_info_message("Floor Set", "Floor has been set.", legacy=True)
+                    cursorCustom = False
+                    print("cursorcustom set to false on 2612")
+                    self.reset_cursor_and_mode()
+                    self.initial_setup_complete = True  # Mark initial setup as complete
+                elif self.current_mode == "particle":
+                    x, y = scene_pos.x(), scene_pos.y()
+                    height = self.calculate_height(x, y)
+                    particle = {
+                        'x': x,
+                        'y': y,
+                        'name': f'P{len(self.particles) + 1}',
+                        'height': height,
+                        'label_pos': QPointF(x + 10, y - 60)
+                    }
+                    self.particles.append(particle)
+                    self.draw_particles()
 
+    def reset_cursor_and_mode(self):
+        self.current_mode = "particle"
+        self.current_set_mode = None
+        self.graphics_view.setCursor(Qt.ArrowCursor)
+        print("cursor set to arrow !!!!! in reset_cursor_and_mode")
+        self.update_particle_heights()
 
     def update_particle_name(self, label, new_name):
         for particle in self.particles:
@@ -2671,6 +2762,8 @@ class CapillaryAnalyzer(QMainWindow):
             }
         """)
         return dialog
+
+
 
     def create_small_button(self, text, icon_path=None):
         button = QPushButton(text)
