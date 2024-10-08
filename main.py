@@ -835,7 +835,7 @@ class TourGuide(QWidget):
         """)
         self.layout.addWidget(self.next_button)
 
-        self.setFixedWidth(350)  # Set a fixed width to make it narrower
+        self.setFixedWidth(420)  # Set a fixed width to make it narrower
 
         self.opacity_effect = QGraphicsOpacityEffect()
         self.setGraphicsEffect(self.opacity_effect)
@@ -848,7 +848,7 @@ class TourGuide(QWidget):
         self.layout.insertWidget(0, self.arrow, 0, Qt.AlignCenter)
 
         self.opacity_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.opacity_animation.setDuration(300)
+        self.opacity_animation.setDuration(150)
         self.opacity_animation.setStartValue(0)
         self.opacity_animation.setEndValue(1)
         self.opacity_animation.setEasingCurve(QEasingCurve.InOutQuad)
@@ -1305,20 +1305,20 @@ class CapillaryAnalyzer(QMainWindow):
         ceiling_floor_right = QVBoxLayout()
         ceiling_increment_layout = QHBoxLayout()
         self.ceiling_up_button = self.create_small_button("▲")
-        self.ceiling_up_button.clicked.connect(lambda: self.increment_ceiling(1))
+        self.ceiling_up_button.clicked.connect(lambda: self.increment_ceiling(-1))
         self.ceiling_down_button = self.create_small_button("▼")
-        self.ceiling_down_button.clicked.connect(lambda: self.increment_ceiling(-1))
-        ceiling_increment_layout.addWidget(self.ceiling_down_button)
+        self.ceiling_down_button.clicked.connect(lambda: self.increment_ceiling(1))
         ceiling_increment_layout.addWidget(self.ceiling_up_button)
+        ceiling_increment_layout.addWidget(self.ceiling_down_button)
         ceiling_floor_right.addLayout(ceiling_increment_layout)
 
         floor_increment_layout = QHBoxLayout()
         self.floor_up_button = self.create_small_button("▲")
-        self.floor_up_button.clicked.connect(lambda: self.increment_floor(1))
+        self.floor_up_button.clicked.connect(lambda: self.increment_floor(-1))
         self.floor_down_button = self.create_small_button("▼")
-        self.floor_down_button.clicked.connect(lambda: self.increment_floor(-1))
-        floor_increment_layout.addWidget(self.floor_down_button)
+        self.floor_down_button.clicked.connect(lambda: self.increment_floor(1))
         floor_increment_layout.addWidget(self.floor_up_button)
+        floor_increment_layout.addWidget(self.floor_down_button)
         ceiling_floor_right.addLayout(floor_increment_layout)
 
         ceiling_floor_layout.addLayout(ceiling_floor_right)
@@ -1880,17 +1880,17 @@ class CapillaryAnalyzer(QMainWindow):
             ("Reset and Clear", "Use these buttons to reset the angle or clear all particle selections.",
              self.reset_angle_button),
             ("Modes", "Select between Handle and Analyze modes to either use clicking for panning or setting stuff.", self.mode_switch),
-            ("Height Reference", "You can find the Height Reference in the Help menu for common device dimensions.",
+            ("Minimap", "You can see the minimap to see your viewpoint, and drag the viewpoint to change it.",
+             self.graphics_view.minimap),
+            ("Height Reference", "Height reference for common device dimensions.",
              "Help/Height Reference"),
             ("Save Workspace",
              "Save your workspace for sharing it with other users or picking up from where you leave off!",
              "File/Save Workspace") if BETA_FEATURES_ENABLED else None,
             ("Load Workspace", "Load saved .phw files to replace the current workspace with the saved one.",
              "File/Load Workspace") if BETA_FEATURES_ENABLED else None,
-            ("That's it!", "You're all set! Remember, you can always access this guide again.", None),
-            ("Interactive Guide",
-             "You can find the Interactive Guide here in the Help menu whenever you need a refresher.",
-             "Help/Interactive Guide")
+            ("That's it!", "You're all set! Remember, you can always access this guide again in the help Menu",
+             "Help/Interactive Guide"),
 
         ]
         self.current_tour_step = 0
