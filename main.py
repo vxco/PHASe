@@ -1530,6 +1530,8 @@ class CapillaryAnalyzer(QMainWindow):
         main_layout.addWidget(control_panel)
         main_layout.addWidget(self.graphics_view, 1)
 
+        self.setup_file_associations()
+
         self.original_image = None
         self.image_item = None
         self.capillary_height = None
@@ -1898,7 +1900,7 @@ class CapillaryAnalyzer(QMainWindow):
         self.recent_files_menu.clear()
         for file in self.recent_files:
             action = QAction(file, self)
-            action.triggered.connect(lambda checked, f=file: self.load_workspace(file))
+            action.triggered.connect(lambda checked, f=file: self.load_workspace(f))
             self.recent_files_menu.addAction(action)
 
     def load_recent_files(self):
@@ -1944,6 +1946,9 @@ class CapillaryAnalyzer(QMainWindow):
     def start_guided_tour(self):
         self.tour_steps = [
             ("Welcome to PHASe!", "Let's go through the main features of the application.", None),
+            ("Load Image", "Click this button to load an image of the capillary.", self.load_button),
+            ("Workspace Name", "You can click here to edit the workspace name. press enter to apply.",
+             self.workspace_name_input),
             ("Set Ceiling", "Click this button and then click on the image to set the ceiling of the capillary.",
              self.set_ceiling_button),
             ("Set Floor", "Click this button and then click on the image to set the Floor of the capillary.",
@@ -1956,8 +1961,10 @@ class CapillaryAnalyzer(QMainWindow):
              self.graphics_view),
             ("Export Data", "When you're done, click this button to save your data as a CSV file.", self.export_button),
             ("Reset and Clear", "Use these buttons to reset the angle or clear all particle selections.",
-             self.reset_angle_button),
-            ("Modes", "Select between Handle and Analyze modes to either use clicking for panning or setting stuff.", self.mode_switch),
+             self.clear_selections_button),
+            (
+            "Modes", "Select between Handle and Analyze modes to either use clicking for panning or setting particles.",
+            self.mode_switch),
             ("Minimap", "You can see the minimap to see your viewpoint, and drag the viewpoint to change it.",
              self.graphics_view.minimap),
             ("Height Reference", "Height reference for common device dimensions.",
@@ -2213,17 +2220,25 @@ class CapillaryAnalyzer(QMainWindow):
         self.update_window_title()
 
     def load_workspace(self, file_name=None):
-        self.image_loaded = True
         if self.unsaved_changes:
-            reply = QMessageBox.question(self, 'Unsaved Changes',
-                                         "You have unsaved changes. Do you want to save before loading a new workspace?",
-                                         QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                                         QMessageBox.Save)
-            if reply == QMessageBox.Save:
-                self.save_workspace()
-            elif reply == QMessageBox.Cancel:
-                return
+            self.show_info_message(
+                "Unsaved Changes",
+                "You have unsaved changes. Would you like to save before loading a new workspace?",
+                buttons=["Save", "Don't Save", "Cancel"],
+                callback=lambda response: self.handle_unsaved_changes_before_load(response, file_name)
+            )
+        else:
+            self.proceed_with_load(file_name)
 
+    def handle_unsaved_changes_before_load(self, response, file_name):
+        if response == "Save":
+            self.save_workspace()
+            self.proceed_with_load(file_name)
+        elif response == "Don't Save":
+            self.proceed_with_load(file_name)
+        # If "Cancel", do nothing
+
+    def proceed_with_load(self, file_name):
         if not file_name:
             file_name, _ = QFileDialog.getOpenFileName(self, "Load Workspace", "", "PHASe Workspace Files (*.phw)")
         if file_name:
@@ -2446,6 +2461,105 @@ class CapillaryAnalyzer(QMainWindow):
                 self.update_lines()  # Update lines after setting the wall thickness
             except ValueError:
                 self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
+
+    def setup_file_associations(self):
+        if sys.platform == 'darwin':  # macOS
+            self.setup_macos_file_association()
+        elif sys.platform == 'win32':  # Windows
+            self.setup_windows_file_association()
+
+    def setup_macos_file_association(self):
+        icns_path = absolute_path("assets/phw_icon.icns")
+
+        # Path to your application
+        app_path = sys.executable
+
+        # Use UTI for file type
+        uti = "com.vxsoftware.phase.phw"
+
+        # Create a plist file for the UTI
+        plist_content = f"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleDocumentTypes</key>
+            <array>
+                <dict>
+                    <key>CFBundleTypeExtensions</key>
+                    <array>
+                        <string>phw</string>
+                    </array>
+                    <key>CFBundleTypeIconFile</key>
+                    <string>{icns_path}</string>
+                    <key>CFBundleTypeName</key>
+                    <string>PHASe Workspace</string>
+                    <key>CFBundleTypeRole</key>
+                    <string>Editor</string>
+                    <key>LSHandlerRank</key>
+                    <string>Owner</string>
+                </dict>
+            </array>
+            <key>UTExportedTypeDeclarations</key>
+            <array>
+                <dict>
+                    <key>UTTypeConformsTo</key>
+                    <array>
+                        <string>public.data</string>
+                    </array>
+                    <key>UTTypeDescription</key>
+                    <string>PHASe Workspace</string>
+                    <key>UTTypeIconFile</key>
+                    <string>{icns_path}</string>
+                    <key>UTTypeIdentifier</key>
+                    <string>{uti}</string>
+                    <key>UTTypeTagSpecification</key>
+                    <dict>
+                        <key>public.filename-extension</key>
+                        <array>
+                            <string>phw</string>
+                        </array>
+                    </dict>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+
+        plist_path = os.path.join(os.path.dirname(app_path), "Info.plist")
+        with open(plist_path, "w") as f:
+            f.write(plist_content)
+
+        # Update the system's Launch Services database
+        subprocess.run(
+            ["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+             "-f", app_path])
+
+    def setup_windows_file_association(self):
+        # Path to the .ico file (you need to create this)
+        ico_path = absolute_path("assets/phw_icon.ico")
+
+        # Path to your application
+        app_path = sys.executable
+
+        try:
+            # Set up file association
+            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, ".phw") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, "PHASeWorkspace")
+
+            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, "PHASeWorkspace") as key:
+                winreg.SetValue(key, "", winreg.REG_SZ, "PHASe Workspace")
+                with winreg.CreateKey(key, "DefaultIcon") as icon_key:
+                    winreg.SetValue(icon_key, "", winreg.REG_SZ, ico_path)
+                with winreg.CreateKey(key, "shell\\open\\command") as command_key:
+                    winreg.SetValue(command_key, "", winreg.REG_SZ, f'"{app_path}" "%1"')
+
+            # Notify the system about the change
+            import ctypes
+            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+
+        except Exception as e:
+            print(f"Error setting up file association: {e}")
 
     def reset_angle(self):
         self.angle_value = 0
