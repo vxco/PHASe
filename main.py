@@ -2536,30 +2536,7 @@ class CapillaryAnalyzer(QMainWindow):
              "-f", app_path])
 
     def setup_windows_file_association(self):
-        # Path to the .ico file (you need to create this)
-        ico_path = absolute_path("assets/phw_icon.ico")
-
-        # Path to your application
-        app_path = sys.executable
-
-        try:
-            # Set up file association
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, ".phw") as key:
-                winreg.SetValue(key, "", winreg.REG_SZ, "PHASeWorkspace")
-
-            with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, "PHASeWorkspace") as key:
-                winreg.SetValue(key, "", winreg.REG_SZ, "PHASe Workspace")
-                with winreg.CreateKey(key, "DefaultIcon") as icon_key:
-                    winreg.SetValue(icon_key, "", winreg.REG_SZ, ico_path)
-                with winreg.CreateKey(key, "shell\\open\\command") as command_key:
-                    winreg.SetValue(command_key, "", winreg.REG_SZ, f'"{app_path}" "%1"')
-
-            # Notify the system about the change
-            import ctypes
-            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
-
-        except Exception as e:
-            print(f"Error setting up file association: {e}")
+        print("placeholder")
 
     def reset_angle(self):
         self.angle_value = 0
