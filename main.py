@@ -89,7 +89,7 @@ try:
                                  QSizePolicy, QMenu, QAction, QGraphicsDropShadowEffect,
                                  QGraphicsEllipseItem, QCheckBox, QLineEdit, QFileDialog,
                                  QMessageBox, QGraphicsOpacityEffect, QSlider, QDialog, QComboBox, QGroupBox,
-                                 QFormLayout, QStyleOptionSlider, QStyle)
+                                 QFormLayout, QStyleOptionSlider, QStyle, QButtonGroup, QRadioButton)
 
     app_logger.info("All modules imported successfully")
 
@@ -1370,8 +1370,26 @@ class CapillaryAnalyzer(QMainWindow):
         self.load_recent_files()
         self.create_menu_bar()
 
+        # Height input mode selection
+        self.height_mode_group = QButtonGroup(self)
+        self.magnet_distance_radio = QRadioButton("Magnet Distance")
+        self.capillary_height_radio = QRadioButton("Capillary Height")
+        self.height_mode_group.addButton(self.magnet_distance_radio)
+        self.height_mode_group.addButton(self.capillary_height_radio)
+        self.capillary_height_radio.setChecked(True)  # Default to capillary height
+
+        # Connect radio buttons to update function
+        self.magnet_distance_radio.toggled.connect(self.update_height_mode)
+        self.capillary_height_radio.toggled.connect(self.update_height_mode)
+
+        # Add radio buttons to layout
+        height_mode_layout = QHBoxLayout()
+        height_mode_layout.addWidget(self.magnet_distance_radio)
+        height_mode_layout.addWidget(self.capillary_height_radio)
+        control_layout.addLayout(height_mode_layout)
+
         # Height Input
-        height_label = QLabel("Capillary Height:")
+        height_label = QLabel("Height Input:")
         height_label.setStyleSheet("color: white; font-size: 14px;")
         height_wall_layout.addWidget(height_label, 0, 0)
 
@@ -1594,6 +1612,12 @@ class CapillaryAnalyzer(QMainWindow):
             self.graphics_view.setPanningEnabled(True)  # Enable panning
             self.show_toast("Switched to Pan Mode", message_type="info")
 
+    def update_height_mode(self):
+        if self.magnet_distance_radio.isChecked():
+            self.height_input.setPlaceholderText("Magnet Distance (mm, µm, pm)")
+        else:
+            self.height_input.setPlaceholderText("Capillary Height (mm, µm, pm)")
+        self.process_height_input()
 
     def process_height_input(self):
         input_text = self.height_input.text().strip().lower()
@@ -1619,24 +1643,43 @@ class CapillaryAnalyzer(QMainWindow):
 
             # Convert to micrometers
             if unit in ['um', 'µm', 'u']:
-                self.capillary_height = number
+                value = number
             elif unit == 'mm':
-                self.capillary_height = number * 1000
+                value = number * 1000
             elif unit == 'pm':
-                self.capillary_height = number / 1000
+                value = number / 1000
             else:
                 raise ValueError("Invalid unit")
+
+            if self.magnet_distance_radio.isChecked():
+                # Subtract wall thickness if it's enabled
+                if self.wall_thickness_checkbox.isChecked():
+                    self.capillary_height = value - (2 * self.wall_thickness)
+                else:
+                    self.capillary_height = value
+            else:
+                self.capillary_height = value
 
             self.height_input.setText(f"{self.capillary_height:.2f} µm")
             self.height_input_valid = True
             self.update_lines()
-            self.show_info_message("Height Set", f"Capillary height set to {self.capillary_height:.2f} µm", legacy=True)
+            self.update_particle_heights()
+
+            if self.magnet_distance_radio.isChecked():
+                if self.wall_thickness_checkbox.isChecked():
+                    self.show_warning_message("Wall Thickness Subtracted", f"Capillary height set to {self.capillary_height:.2f} µm")
+                else:
+                    self.show_info_message("Height Set", f"Capillary height set to {self.capillary_height:.2f} µm",
+                                           legacy=True)
+            else:
+                self.show_info_message("Height Set", f"Capillary height set to {self.capillary_height:.2f} µm",
+                                       legacy=True)
+
+
 
         except ValueError:
             self.show_warning_message("Invalid Input",
                                       "Please enter a valid number followed by a unit (um, mm, or pm).")
-
-        self.update_particle_heights()
 
     def get_app_data_dir(self, app_name, app_author):
         if sys.platform == 'win32':
@@ -1953,8 +1996,9 @@ class CapillaryAnalyzer(QMainWindow):
              self.set_ceiling_button),
             ("Set Floor", "Click this button and then click on the image to set the Floor of the capillary.",
              self.set_floor_button),
-            ("Set Capillary Height", "Enter the capillary height in this input field. You can use mm, µm, or pm units.",
+            ("Set Height", "Enter the capillary height in this input field. You can use mm, µm, or pm units.",
              self.height_input),
+            ("Select Height Input Type","Select magnet height or capillary height to allow correct wall thickness calculations", self.capillary_height_radio),
             ("Adjust Angle", "Use these scroll wheels or enter a value directly to adjust the angle of the capillary.",
              self.angle_input),
             ("Add Particles", "Click on the image to add particles. You can drag the labels to reposition them.",
@@ -2930,42 +2974,6 @@ class CapillaryAnalyzer(QMainWindow):
                         end_y = start_y + width * slope
                         self.ceiling_ghost_line = self.scene.addLine(0, start_y, width, end_y, ghost_pen)
 
-    def set_height(self):
-        if not self.check_image_loaded():
-            return
-        dialog = self.create_styled_input_dialog("Set Capillary Height", "(mm, um, pm):")
-        if dialog.exec_() == QInputDialog.Accepted:
-            height = dialog.textValue().replace(" ", "").lower()
-            unit_start = 0
-            for i, char in enumerate(height):
-                if not (char.isdigit() or char == '.'):
-                    unit_start = i
-                    break
-
-            if unit_start == 0:
-                self.show_warning_message("Invalid Input", "Please enter a number followed by a unit (mm, um, or pm).")
-                return
-
-            try:
-                value = float(height[:unit_start])
-                unit = height[unit_start:]
-
-                if unit == 'um':
-                    self.capillary_height = value
-                elif unit == 'mm':
-                    self.capillary_height = value * 1000
-                elif unit == 'pm':
-                    self.capillary_height = value / 1000
-                else:
-                    self.show_warning_message("Invalid Unit", "Please use um, mm, or pm.")
-                    return
-
-                self.show_info_message("Height Set", f"Capillary height set to {self.capillary_height} µm")
-                self.update_lines()  # Update lines after setting the height
-            except ValueError:
-                self.show_warning_message("Invalid Number", "Please enter a valid number followed by a unit.")
-
-        self.update_particle_heights()
 
     def create_styled_input_dialog(self, title, label, text=""):
         dialog = QInputDialog(self)
@@ -3160,14 +3168,19 @@ class CapillaryAnalyzer(QMainWindow):
         self.draw_particles()
 
     def update_particle_heights(self):
-        if self.capillary_height is not None and self.ceiling_y is not None and self.floor_y is not None:
-            for particle in self.particles:
-                new_height = self.calculate_height(particle['x'], particle['y'])
-                particle['height'] = new_height
-                if 'label_item' in particle:
-                    particle['label_item'].update_height(new_height)
-            self.update_connection_lines()
-            self.scene.update()
+        if self.capillary_height is None or self.ceiling_y is None or self.floor_y is None:
+            return
+
+        capillary_pixels = abs(self.floor_y - self.ceiling_y)
+        for particle in self.particles:
+            particle_y = particle['y']
+            relative_height = (self.floor_y - particle_y) / capillary_pixels
+            particle['height'] = relative_height * self.capillary_height
+
+            if 'label_item' in particle:
+                particle['label_item'].update_height(particle['height'])
+
+        self.set_unsaved_changes()
 
     def delete_particle(self, label):
         for i, particle in enumerate(self.particles):
