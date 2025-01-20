@@ -2,8 +2,8 @@
 
 PHASe is an open source tool for measuring particle heights in imaged capillary systems.
 
-> [!WARNING]
-> This software is currently being developed for macOS and Windows using different platforms could result in unexpected results.
+> [!INFO]
+> This software has been verified to work with MacOS, Windows and all major Linux distributions.
 ---
 
 Created by Alfa Ozaltin @ VX Software // MMXXIV
