@@ -1,6 +1,7 @@
 """
 Graphics components for PHASe application
 """
+import time
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QLineF, pyqtSignal,
                           QObject, QTimer)
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QTouchEvent
@@ -8,6 +9,7 @@ from PyQt5.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsTextItem, QGraphicsRectItem, QGraphicsItem,
                              QMenu, QInputDialog, QWidget)
 from core.models import Particle
+from utils.logging_utils import app_logger_instance, performance_logger
 import math
 
 
@@ -21,6 +23,7 @@ class DraggableLabel(QGraphicsItemGroup):
     """Draggable label for particle annotations"""
 
     def __init__(self, x, y, name, height, analyzer):
+        start_time = time.perf_counter()
         super().__init__()
         self.setFlag(QGraphicsItemGroup.ItemIsMovable)
         self.setFlag(QGraphicsItemGroup.ItemSendsGeometryChanges)
@@ -34,60 +37,66 @@ class DraggableLabel(QGraphicsItemGroup):
         self.notes = ""
         self.create_label()
 
+        end_time = time.perf_counter()
+        duration_ms = (end_time - start_time) * 1000
+        app_logger_instance.log_calculation("UI", "DraggableLabel creation", duration_ms,
+                                           name=name, height=height)
+
     def create_label(self):
         """Create the visual label components"""
-        font_size = 14
-        label_text = self.get_label_text()
-        label = QGraphicsTextItem(label_text)
-        font = QFont("Arial", font_size)
-        label.setFont(font)
-        label.setDefaultTextColor(QColor(255, 255, 255))
+        with performance_logger.log_timing("Label Component Creation"):
+            font_size = 14
+            label_text = self.get_label_text()
+            label = QGraphicsTextItem(label_text)
+            font = QFont("Arial", font_size)
+            label.setFont(font)
+            label.setDefaultTextColor(QColor(255, 255, 255))
 
-        text_width = label.boundingRect().width()
-        text_height = label.boundingRect().height()
-        padding = 8
-        delete_button_size = 20
-        total_width = max(text_width + delete_button_size + padding * 2, 100)
-        total_height = max(text_height, delete_button_size) + padding * 2
+            text_width = label.boundingRect().width()
+            text_height = label.boundingRect().height()
+            padding = 8
+            delete_button_size = 20
+            total_width = max(text_width + delete_button_size + padding * 2, 100)
+            total_height = max(text_height, delete_button_size) + padding * 2
 
-        # Background
-        background = QGraphicsRectItem(0, 0, total_width, total_height)
-        background.setBrush(QColor(60, 60, 60, 220))
-        background.setPen(QPen(QColor(100, 100, 100), 1))
+            # Background
+            background = QGraphicsRectItem(0, 0, total_width, total_height)
+            background.setBrush(QColor(60, 60, 60, 220))
+            background.setPen(QPen(QColor(100, 100, 100), 1))
 
-        # Position label text
-        label.setPos(QPointF(padding, padding))
+            # Position label text
+            label.setPos(QPointF(padding, padding))
 
-        # Delete button
-        delete_button = QGraphicsRectItem(
-            total_width - delete_button_size - padding, padding,
-            delete_button_size, delete_button_size
-        )
-        delete_button.setBrush(QColor(200, 60, 60))
-        delete_button.setPen(QPen(QColor(220, 80, 80), 1))
-        delete_button.setFlag(QGraphicsItem.ItemIsSelectable)
+            # Delete button
+            delete_button = QGraphicsRectItem(
+                total_width - delete_button_size - padding, padding,
+                delete_button_size, delete_button_size
+            )
+            delete_button.setBrush(QColor(200, 60, 60))
+            delete_button.setPen(QPen(QColor(220, 80, 80), 1))
+            delete_button.setFlag(QGraphicsItem.ItemIsSelectable)
 
-        # Delete cross
-        delete_cross = QGraphicsTextItem('×')
-        delete_cross.setFont(QFont("Arial", delete_button_size - 4, QFont.Bold))
-        delete_cross.setDefaultTextColor(QColor(255, 255, 255))
+            # Delete cross
+            delete_cross = QGraphicsTextItem('×')
+            delete_cross.setFont(QFont("Arial", delete_button_size - 4, QFont.Bold))
+            delete_cross.setDefaultTextColor(QColor(255, 255, 255))
 
-        cross_rect = delete_cross.boundingRect()
-        cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
-        cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
-        delete_cross.setPos(cross_x, cross_y)
+            cross_rect = delete_cross.boundingRect()
+            cross_x = delete_button.rect().x() + (delete_button_size - cross_rect.width()) / 2
+            cross_y = delete_button.rect().y() + (delete_button_size - cross_rect.height()) / 2
+            delete_cross.setPos(cross_x, cross_y)
 
-        # Add all components to group
-        self.addToGroup(background)
-        self.addToGroup(label)
-        self.addToGroup(delete_button)
-        self.addToGroup(delete_cross)
-        self.delete_button = delete_button
+            # Add all components to group
+            self.addToGroup(background)
+            self.addToGroup(label)
+            self.addToGroup(delete_button)
+            self.addToGroup(delete_cross)
+            self.delete_button = delete_button
 
-        # Apply scale and position
-        scale_factor = 1 / self.analyzer.scale_factor
-        self.setScale(scale_factor)
-        self.setPos(self.x + 10 / scale_factor, self.y - total_height * scale_factor - 10 / scale_factor)
+            # Apply scale and position
+            scale_factor = 1 / self.analyzer.scale_factor
+            self.setScale(scale_factor)
+            self.setPos(self.x + 10 / scale_factor, self.y - total_height * scale_factor - 10 / scale_factor)
 
     def get_label_text(self):
         """Get formatted label text"""
@@ -98,7 +107,10 @@ class DraggableLabel(QGraphicsItemGroup):
 
     def update_height(self, new_height):
         """Update the displayed height"""
+        old_height = self.height
         self.height = new_height
+        app_logger_instance.log_event("PARTICLE", "Height updated",
+                                    name=self.name, old_height=old_height, new_height=new_height)
         self.update_label_text()
         self.analyzer.set_unsaved_changes()
 
