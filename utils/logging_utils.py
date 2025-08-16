@@ -16,7 +16,7 @@ class Logger:
 
     def get_log_path(self, filename):
         if getattr(sys, 'frozen', False):
-            if sys.platform == 'darwin':
+            if sys.platform == 'Darwin':
                 return os.path.join(os.path.expanduser('~/Library/Logs'), self.app_name, filename)
             else:
                 return os.path.join(os.path.dirname(sys.executable), 'logs', filename)
@@ -24,14 +24,14 @@ class Logger:
             return os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs', filename)
 
     def setup_logging(self):
-        log_file = self.get_log_path('app.log')
+        log_file = self.get_log_path('phase.log')
         log_dir = os.path.dirname(log_file)
         os.makedirs(log_dir, exist_ok=True)
 
         file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
         console_handler = logging.StreamHandler()
 
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s | %(message)s')
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
 

@@ -35,7 +35,9 @@ def deserialize_qt_object(obj):
 
 
 def parse_input_with_units(input_text):
-    """Parse input text with units (mm, µm, pm) and convert to micrometers"""
+    """Parse input text with units and convert to micrometers.
+    Supported units: mm, µm/um/u, nm, pm.
+    """
     if not input_text:
         return None
 
@@ -61,8 +63,10 @@ def parse_input_with_units(input_text):
             return number
         elif unit == 'mm':
             return number * 1000
-        elif unit == 'pm':
+        elif unit == 'nm':
             return number / 1000
+        elif unit == 'pm':
+            return number / 1_000_000
         else:
             raise ValueError(f"Invalid unit: {unit}")
 

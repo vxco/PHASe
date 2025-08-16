@@ -3,11 +3,12 @@ Graphics components for PHASe application
 """
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QLineF, pyqtSignal,
                           QObject, QTimer)
-from PyQt5.QtGui import QPainter, QColor, QPen, QFont
+from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QTouchEvent
 from PyQt5.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsItemGroup,
                              QGraphicsTextItem, QGraphicsRectItem, QGraphicsItem,
                              QMenu, QInputDialog, QWidget)
 from core.models import Particle
+import math
 
 
 class DraggableLabelSignals(QObject):
@@ -121,7 +122,7 @@ class DraggableLabel(QGraphicsItemGroup):
 
         # Update delete button position
         delete_button = self.childItems()[2]
-        delete_button.setRect(total_width - delete_button_size - padding, padding, 
+        delete_button.setRect(total_width - delete_button_size - padding, padding,
                              delete_button_size, delete_button_size)
 
         # Update delete cross position
@@ -146,7 +147,7 @@ class DraggableLabel(QGraphicsItemGroup):
         menu = QMenu()
         rename_action = menu.addAction("Rename")
         delete_action = menu.addAction("Delete")
-        
+
         action = menu.exec_(pos)
         if action == rename_action:
             self.rename()
@@ -291,10 +292,23 @@ class CustomGraphicsView(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag)
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
 
-        # Initialize minimap placeholder
-        self.minimap = None
+        # Enable touch events for pinch-to-zoom
+        self.setAttribute(Qt.WA_AcceptTouchEvents, True)
+        self.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
+
+        # Initialize minimap
+        self.minimap = Minimap(self)
+        self.minimap.hide()
+        self._image_pixmap = None
         self.panning_enabled = True
         self.last_pan_pos = None
+
+        # Touch/pinch variables
+        self.touch_points = {}
+        self.initial_distance = 0
+        self.initial_scale = 1.0
+        self.pinch_center = QPointF()
+        self.is_pinching = False
 
     def setPanningEnabled(self, enabled):
         """Enable or disable panning"""
@@ -307,23 +321,161 @@ class CustomGraphicsView(QGraphicsView):
 
     def position_widgets(self):
         """Position child widgets like minimap and zoom controls"""
-        # Placeholder for widget positioning
-        pass
+        if not self.minimap:
+            return
+        # Place minimap at bottom-right of the viewport with margin
+        margin = 12
+        vrect = self.viewport().geometry()
+        x = vrect.right() - self.minimap.width() - margin
+        y = vrect.bottom() - self.minimap.height() - margin
+        self.minimap.move(x, y)
 
     def update_minimap(self):
         """Update minimap display"""
-        # Placeholder for minimap update
-        pass
+        if not self.scene() or self.scene().sceneRect().isNull():
+            self.minimap.hide()
+            return
+        # Ensure minimap is visible when an image is set
+        if self._image_pixmap is None:
+            self.minimap.hide()
+            return
+        self.minimap.show()
+        view_rect_scene = self.mapToScene(self.viewport().rect()).boundingRect()
+        full_rect = self.scene().sceneRect()
+        self.minimap.update_rects(view_rect_scene, full_rect)
 
     def set_image(self, pixmap):
-        """Set the background image"""
-        # Placeholder for image setting
-        pass
+        """Set the background image for minimap display"""
+        self._image_pixmap = pixmap
+        if pixmap is not None:
+            self.minimap.set_pixmap(pixmap)
+            self.minimap.show()
+            self.update_minimap()
+        else:
+            self.minimap.hide()
 
     def center_on(self, pos):
         """Center view on specified position"""
         self.centerOn(pos)
         self.update_minimap()
+
+    def viewportEvent(self, event):
+        """Handle viewport events including touch events"""
+        if event.type() == event.TouchBegin or event.type() == event.TouchUpdate or event.type() == event.TouchEnd:
+            return self.handleTouchEvent(event)
+        return super().viewportEvent(event)
+
+    def handleTouchEvent(self, event):
+        """Handle touch events for pinch-to-zoom"""
+        touch_points = event.touchPoints()
+
+        if len(touch_points) == 2:
+            # Two finger pinch gesture
+            point1 = touch_points[0]
+            point2 = touch_points[1]
+
+            # Use screenPos for more reliable coordinates
+            pos1 = self.mapFromGlobal(point1.screenPos().toPoint())
+            pos2 = self.mapFromGlobal(point2.screenPos().toPoint())
+
+            # Calculate center point between the two touches
+            center_x = (pos1.x() + pos2.x()) / 2.0
+            center_y = (pos1.y() + pos2.y()) / 2.0
+            current_center = QPointF(center_x, center_y)
+
+            # Calculate distance between touch points
+            dx = pos1.x() - pos2.x()
+            dy = pos1.y() - pos2.y()
+            current_distance = math.sqrt(dx * dx + dy * dy)
+
+            if event.touchPointStates() & Qt.TouchPointPressed:
+                # Start of pinch gesture
+                self.is_pinching = True
+                self.initial_distance = current_distance
+                self.initial_scale = self.transform().m11()  # Get current scale
+                self.pinch_center = self.mapToScene(current_center.toPoint())
+
+            elif event.touchPointStates() & Qt.TouchPointMoved and self.is_pinching:
+                # During pinch gesture
+                if self.initial_distance > 10:  # Minimum distance threshold
+                    # Calculate scale factor
+                    scale_factor = current_distance / self.initial_distance
+                    new_scale = self.initial_scale * scale_factor
+
+                    # Limit zoom range (0.1x to 10x)
+                    new_scale = max(0.1, min(10.0, new_scale))
+
+                    # Calculate zoom factor to apply
+                    current_scale = self.transform().m11()
+                    zoom_factor = new_scale / current_scale
+
+                    # Only apply zoom if there's a significant change
+                    if abs(zoom_factor - 1.0) > 0.01:
+                        # Save current transformation anchor
+                        old_anchor = self.transformationAnchor()
+                        self.setTransformationAnchor(QGraphicsView.NoAnchor)
+
+                        # Get scene position before scaling
+                        scene_pos = self.pinch_center
+                        view_pos = self.mapFromScene(scene_pos)
+
+                        # Apply scaling
+                        self.scale(zoom_factor, zoom_factor)
+
+                        # Adjust view to keep pinch center in the same position
+                        new_view_pos = self.mapFromScene(scene_pos)
+                        delta = new_view_pos - view_pos
+                        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + delta.x())
+                        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta.y())
+
+                        # Restore transformation anchor
+                        self.setTransformationAnchor(old_anchor)
+
+                        # Update minimap
+                        self.update_minimap()
+
+                        # Notify parent if it has a zoom update method
+                        parent_widget = self.parent()
+                        while parent_widget:
+                            if hasattr(parent_widget, 'update_zoom_indicator'):
+                                parent_widget.zoom_factor = new_scale
+                                parent_widget.update_zoom_indicator()
+                                break
+                            parent_widget = parent_widget.parent()
+
+            elif event.touchPointStates() & Qt.TouchPointReleased:
+                # End of pinch gesture
+                self.is_pinching = False
+                self.initial_distance = 0
+
+            event.accept()
+            return True
+
+        elif len(touch_points) == 1 and not self.is_pinching:
+            # Single touch - used for panning
+            point = touch_points[0]
+            pos = self.mapFromGlobal(point.screenPos().toPoint())
+
+            if event.touchPointStates() & Qt.TouchPointPressed:
+                self.last_pan_pos = pos
+                self.setCursor(Qt.ClosedHandCursor)
+
+            elif event.touchPointStates() & Qt.TouchPointMoved and self.panning_enabled:
+                if self.last_pan_pos:
+                    delta = pos - self.last_pan_pos
+                    self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+                    self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+                    self.last_pan_pos = pos
+                    self.update_minimap()
+
+            elif event.touchPointStates() & Qt.TouchPointReleased:
+                self.last_pan_pos = None
+                self.setCursor(Qt.ArrowCursor)
+
+            event.accept()
+            return True
+
+        return False
 
     def mousePressEvent(self, event):
         """Handle mouse press for panning"""

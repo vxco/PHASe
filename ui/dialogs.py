@@ -5,8 +5,8 @@ import platform
 import random
 import math
 from PyQt5.QtCore import (Qt, QPoint, QPointF, QTimer, QPropertyAnimation,
-                          QEasingCurve, QParallelAnimationGroup, QEventLoop)
-from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap, QFont,
+                          QEasingCurve, QParallelAnimationGroup, QEventLoop, QVariantAnimation)
+from PyQt5.QtGui import (QPainter, QColor, QPen, QPixmap,
                          QFontDatabase, QRadialGradient, QTransform)
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGraphicsOpacityEffect, QGraphicsDropShadowEffect)
@@ -31,7 +31,9 @@ class AboutDialog(QWidget):
         layout.setContentsMargins(40, 40, 40, 40)
 
         # Load custom font
-        QFontDatabase.addApplicationFont(absolute_path("assets/Roboto-Light.ttf"))
+        font_id = QFontDatabase.addApplicationFont(absolute_path("assets/Roboto-Light.ttf"))
+        families = QFontDatabase.applicationFontFamilies(font_id) if font_id != -1 else []
+        self.ui_font_family = families[0] if families else "Helvetica"
 
         # Logo
         logo_label = QLabel()
@@ -42,12 +44,12 @@ class AboutDialog(QWidget):
 
         # About text
         about_text = f"""
-        <h2 style='color: #e0e0e0; text-align: center; font-family: "Roboto Light", sans-serif;'>PHASe</h2>
-        <h3 style='color: #3498db; text-align: center; font-family: "Roboto Light", sans-serif;'>Particle Height Analysis Software</h3>
-        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
-        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
-        <p style='color: #b0b0b0; text-align: center; font-family: "Roboto Light", sans-serif;'>Developed by: Alfa Ozaltin @ VX Software</p>
-        <p style='color: #808080; text-align: center; font-family: "Roboto Light", sans-serif;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
+        <h2 style='color: #e0e0e0; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>PHASe</h2>
+        <h3 style='color: #3498db; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>Particle Height Analysis Software</h3>
+        <p style='color: #b0b0b0; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>Version: {CURRENT_VERSION} ({CURRENT_VERSION_NAME})</p>
+        <p style='color: #b0b0b0; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>PHASe is an open source tool for measuring particle heights in imaged capillary systems.</p>
+        <p style='color: #b0b0b0; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>Developed by: Alfa Ozaltin @ VX Software</p>
+        <p style='color: #808080; text-align: center; font-family: "{self.ui_font_family}", sans-serif;'>Current Platform: {"MacOS (Darwin)" if platform.system() == "Darwin" else f"{platform.system()}"} {platform.release()}</p>
         """
         self.about_label = QLabel(about_text)
         self.about_label.setWordWrap(True)
@@ -102,10 +104,10 @@ class AboutDialog(QWidget):
         self.frog_label.hide()
 
         # Frog rotation animation
-        self.rotation_anim = QPropertyAnimation(self, b"frogRotation")
+        self.rotation_anim = QVariantAnimation(self)
         self.rotation_anim.setDuration(2000)  # 2 seconds for a full rotation
-        self.rotation_anim.setStartValue(0)
-        self.rotation_anim.setEndValue(360)
+        self.rotation_anim.setStartValue(0.0)
+        self.rotation_anim.setEndValue(360.0)
         self.rotation_anim.setLoopCount(-1)  # Infinite loop
         self.rotation_anim.valueChanged.connect(self.rotateFrog)
 
